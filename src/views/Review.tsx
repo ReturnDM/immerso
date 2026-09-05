@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Grade, RecordLogItem } from "ts-fsrs";
-import { applyReview, getQueue, type QueueItem } from "../lib/db";
+import { applyReview, getQueue, getSetting, type QueueItem } from "../lib/db";
 import { GRADE_META, GRADES, previewOptions, speak, stateLabel } from "../lib/fsrs";
 
 // ECDICT 的 translation 用字面 "\n" 分隔多条释义
@@ -23,11 +23,13 @@ export default function Review({ onExit }: { onExit: () => void }) {
   const [options, setOptions] = useState<{ grade: Grade; text: string }[] | null>(null);
   const [answered, setAnswered] = useState(0);
   const [bug, setBug] = useState<string | null>(null);
+  const autoSpeak = useRef(false);
   const schedulingRef = useRef<Record<Grade, RecordLogItem> | null>(null);
   const shownAt = useRef(Date.now());
 
   useEffect(() => {
     getQueue().then(setQueue).catch(console.error);
+    getSetting("auto_pronounce").then((v) => (autoSpeak.current = v !== "off"));
   }, []);
 
   const item = queue?.[idx];
@@ -38,6 +40,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
     schedulingRef.current = scheduling;
     setOptions(opts);
     setFlipped(true);
+    if (autoSpeak.current) speak(item.word);
   }, [item]);
 
   const rate = useCallback(
@@ -103,7 +106,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
   return (
     <div className="min-h-screen flex flex-col">
       {/* 顶栏：退出 + 进度 */}
-      <div className="flex items-center px-6 pt-5 text-sm text-zinc-500">
+      <div className="flex items-center px-6 pt-12 text-sm text-zinc-500">
         <button onClick={onExit} className="hover:text-zinc-200 transition-colors">
           ✕
         </button>
@@ -121,7 +124,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
         onClick={() => !flipped && flip()}
       >
         {!flipped ? (
-          <div className="text-center">
+          <div key={item!.id} className="text-center animate-card-in">
             <div className="text-6xl font-light">{item!.word}</div>
             <button
               onClick={(e) => {
@@ -136,7 +139,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
             <p className="mt-16 text-xs text-zinc-600 animate-pulse">空格 / 点击 翻面</p>
           </div>
         ) : (
-          <div className="text-center max-w-xl w-full">
+          <div key={item!.id} className="text-center max-w-xl w-full animate-card-in">
             <div className="text-4xl font-light">{item!.word}</div>
             {item!.dict?.phonetic && (
               <p className="mt-2 text-teal-400/80">/{item!.dict.phonetic}/</p>

@@ -1,16 +1,18 @@
 import { useEffect, useState } from "react";
-import { getDailyNew, setSetting } from "../lib/db";
+import { getDailyNew, getSetting, setSetting } from "../lib/db";
 import { lastSyncText, neathSync } from "../lib/neath";
 
 export default function Settings({ onBack }: { onBack: () => void }) {
   const [quota, setQuota] = useState("10");
   const [saved, setSaved] = useState(false);
+  const [autoSpeak, setAutoSpeak] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [lastSync, setLastSync] = useState<string | null>(null);
 
   useEffect(() => {
     getDailyNew().then((v) => setQuota(String(v)));
+    getSetting("auto_pronounce").then((v) => setAutoSpeak(v !== "off"));
     lastSyncText().then(setLastSync);
   }, []);
 
@@ -77,6 +79,31 @@ export default function Settings({ onBack }: { onBack: () => void }) {
               {saved ? "✓ 已保存" : "保存"}
             </button>
           </div>
+        </div>
+
+        {/* 复习体验 */}
+        <div className="rounded-2xl bg-zinc-900/60 border border-zinc-800/80 px-5 py-4 flex items-center">
+          <div>
+            <p className="text-zinc-200">翻面自动发音</p>
+            <p className="mt-1 text-xs text-zinc-500">复习卡翻到背面时自动朗读单词（系统 TTS）</p>
+          </div>
+          <button
+            onClick={() => {
+              const next = !autoSpeak;
+              setAutoSpeak(next);
+              setSetting("auto_pronounce", next ? "on" : "off");
+            }}
+            className={`ml-auto relative w-11 h-6 rounded-full transition-colors ${
+              autoSpeak ? "bg-teal-700" : "bg-zinc-700"
+            }`}
+            title={autoSpeak ? "开" : "关"}
+          >
+            <span
+              className={`absolute top-0.5 w-5 h-5 rounded-full bg-zinc-200 transition-all ${
+                autoSpeak ? "left-[22px]" : "left-0.5"
+              }`}
+            />
+          </button>
         </div>
 
         {/* 匿词同步 */}

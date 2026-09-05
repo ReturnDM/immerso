@@ -5,9 +5,10 @@ interface Props {
   onStart: () => void;
   onSearch: () => void;
   onSettings: () => void;
+  onStats: () => void;
 }
 
-export default function Home({ onStart, onSearch, onSettings }: Props) {
+export default function Home({ onStart, onSearch, onSettings, onStats }: Props) {
   const [stats, setStats] = useState<TodayStats | null>(null);
 
   useEffect(() => {
@@ -29,12 +30,18 @@ export default function Home({ onStart, onSearch, onSettings }: Props) {
 
   return (
     <div className="min-h-screen flex flex-col items-center px-6 py-10">
-      <div className="w-full max-w-3xl self-center flex items-center text-sm">
+      <div className="w-full max-w-3xl self-center flex items-center text-sm pt-2">
         <button
           onClick={onSettings}
           className="text-zinc-500 hover:text-teal-400 transition-colors"
         >
           设置
+        </button>
+        <button
+          onClick={onStats}
+          className="ml-4 text-zinc-500 hover:text-teal-400 transition-colors"
+        >
+          统计
         </button>
         <button
           onClick={onSearch}
