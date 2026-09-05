@@ -1,7 +1,45 @@
-# Tauri + React + Typescript
+# 浸词 immerso
 
-This template should help get you started developing with Tauri, React and Typescript in Vite.
+桌面背单词应用：**完整自建复习闭环**——词典、收词、FSRS 复习、统计全部本地自持，无账号无云端。Windows 桌面端（Tauri 2）。
 
-## Recommended IDE Setup
+## 功能
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+- **离线词典**：ECDICT 77 万词条，音标 / 双语释义 / 英文释义 / 词频，精确匹配 + 前缀模糊，系统 TTS 发音
+- **复习闭环**：ts-fsrs（FSRS-5）调度；全屏沉浸单卡，正面只有单词，空格翻面，认知自评四档（忘记 / 困难 / 良好 / 简单）带间隔预览；键盘流 1-4 评分
+- **每日队列**：到期复习卡 + 新词按每日配额入队（设置页可调）
+- **收词**：
+  - 应用内查词，可带**收词时的原句**（原句会出现在复习卡背面——语境记词）
+  - 同步 [匿词 Neath](https://neath.clingword.com) 收藏（只读拉取 API，新词带原句流入队列）
+  - 脚本批量导入（`scripts/seed-cards.mjs`）
+- **统计**：今日进度环、连续学习天数、累计复习次数、GitHub 式 17 周热力图
+- **沉浸**：无边框窗口、深色主题、翻面自动发音、卡片动效
+- **数据自主**：SQLite 双文件（只读词典库 + 用户库），备份 = 复制一个 `immerso.db`
+
+## 开发
+
+```bash
+# 环境要求：Node 20+、Rust (stable-msvc)、WebView2
+npm install
+npm run tauri dev        # 开发运行
+npm run tauri build      # 产出 NSIS 安装包
+```
+
+词典数据（约 66MB CSV）不进仓库，需一次性导入：
+
+```bash
+# 下载 ECDICT 的 ecdict.csv 到 .cache/ 后：
+node scripts/import-ecdict.mjs   # 生成 %APPDATA%\com.returndm.immerso\dict.db
+node scripts/seed-cards.mjs 30   # 可选：灌 30 个 CET4 高频词试玩
+```
+
+匿名同步需在用户主目录放置 `.neath-api-key`（匿词 API Key，勿提交）。
+
+## 致谢
+
+- 词典数据：[ECDICT](https://github.com/skywind3000/ECDICT)（CC BY-NC 4.0，仅个人学习用途）
+- 记忆算法：[ts-fsrs](https://github.com/open-spaced-repetition/ts-fsrs)（FSRS-5）
+- 桌面框架：[Tauri 2](https://tauri.app/)
+
+---
+
+个人学习项目，跟读慢速西游记一样随缘更新 ✌️
