@@ -3,56 +3,73 @@
 @keyframes card-in {
   from {
     opacity: 0;
-    transform: translateY(14px);
+    transform: translateY(10px);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: none;
   }
 }
 
-.animate-card-in {
-  animation: card-in 0.28s ease-out;
+@media (prefers-reduced-motion: no-preference) {
+  .animate-card-in {
+    animation: card-in 0.24s ease-out;
+  }
 }
 
 :root {
   font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
 }
 
-/* 主题令牌：深色默认，html[data-theme="light"] 整体切换 */
+/* 主题令牌：深色 = 墨潭，浅色 = 宣纸；强调色 = 青瓷 */
 :root,
 html[data-theme="dark"] {
-  --bg: #0f1115;
-  --text: #e6e8ee;
-  --t2: #aab0bc;
-  --t3: #828896;
-  --t4: #565c68;
-  --panel: rgba(23, 26, 33, 0.6);
-  --border: rgba(56, 61, 72, 0.9);
-  --input: #16181e;
-  --hover: rgba(44, 48, 58, 0.5);
-  --accent: #2dd4bf;
-  --heat-0: rgba(56, 61, 72, 0.5);
+  --bg: #0b0d11;
+  --text: #e3e6ec;
+  --t2: #9ba3b0;
+  --t3: #717886;
+  --t4: #4c525e;
+  --panel: rgba(21, 24, 30, 0.55);
+  --border: rgba(60, 66, 78, 0.65);
+  --input: #14171d;
+  --hover: rgba(46, 52, 62, 0.45);
+  --accent: #8fd0c0;
+  --accent-dim: rgba(143, 208, 192, 0.35);
+  --heat-0: rgba(60, 66, 78, 0.4);
+  --key-again: #d08a8a;
+  --key-hard: #d0b087;
+  --key-good: #7fcab8;
+  --key-easy: #8fb8d8;
 }
 
 html[data-theme="light"] {
-  --bg: #f4f5f7;
-  --text: #1c1e24;
-  --t2: #4b5058;
-  --t3: #71767f;
-  --t4: #a0a5ae;
-  --panel: #ffffff;
-  --border: #e2e4e9;
-  --input: #ffffff;
-  --hover: #eceef2;
-  --accent: #0d9488;
-  --heat-0: #e3e5ea;
+  --bg: #f6f4ee;
+  --text: #22252c;
+  --t2: #565b66;
+  --t3: #7d828d;
+  --t4: #a8adb6;
+  --panel: #fffefb;
+  --border: #e5e2d9;
+  --input: #fffefb;
+  --hover: #efede5;
+  --accent: #177063;
+  --accent-dim: rgba(23, 112, 99, 0.3);
+  --heat-0: #e7e4da;
+  --key-again: #b05252;
+  --key-hard: #b07d2e;
+  --key-good: #177063;
+  --key-easy: #3e6f96;
 }
 
 body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
+}
+
+/* 单词展示：字典衬线 */
+.word-serif {
+  font-family: Georgia, "Times New Roman", "Noto Serif SC", "Source Han Serif SC", serif;
 }
 
 @layer components {
@@ -82,5 +99,37 @@ body {
   }
   .link-strong:hover {
     color: var(--text);
+  }
+  /* 水线：一条记录进度的细线 */
+  .waterline {
+    position: relative;
+    height: 2px;
+    background: var(--border);
+    border-radius: 1px;
+    overflow: hidden;
+  }
+  .waterline > i {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    background: var(--accent);
+    transition: width 0.6s ease;
+  }
+  /* 键帽：评分快捷键提示 */
+  .keycap {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 11px;
+    flex: none;
+  }
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
 }

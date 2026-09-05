@@ -1,6 +1,7 @@
 import Database from "@tauri-apps/plugin-sql";
 import type { Card, Grade, RecordLogItem } from "ts-fsrs";
 import { toCard } from "./fsrs";
+import { DEFAULT_MODES, parseModes, serializeModes, type ExMode } from "./exercises";
 
 export const DEFAULT_DAILY_NEW = 10;
 export const DEFAULT_DECK = "生词本";
@@ -73,6 +74,20 @@ export async function getDailyNew(): Promise<number> {
   const v = Number(await getSetting("daily_new"));
   return Number.isFinite(v) && v >= 1 ? Math.floor(v) : DEFAULT_DAILY_NEW;
 }
+
+/** 启用的练习模式（勾选制）；兼容旧的 exercise_mode 单选值 */
+export async function getEnabledModes(): Promise<ExMode[]> {
+  const newV = await getSetting("exercise_modes");
+  if (newV !== null) return parseModes(newV);
+  const old = await getSetting("exercise_mode");
+  if (old === "dictation") return ["dictation"];
+  if (old === "mix") return ["self", "dictation"];
+  if (old === "self") return ["self"];
+  return [...DEFAULT_MODES];
+}
+
+export const setEnabledModes = (modes: ExMode[]) =>
+  setSetting("exercise_modes", serializeModes(modes));
 
 // ---------- 词库（deck） ----------
 

@@ -7,6 +7,7 @@ import {
   type DictEntry,
 } from "../lib/db";
 import { speak } from "../lib/fsrs";
+import { Icon } from "../components/Icon";
 
 // ECDICT 的 translation 用字面 "\n" 分隔多条释义
 function Translation({ text }: { text: string }) {
@@ -120,7 +121,7 @@ export default function Search({ onBack }: { onBack: () => void }) {
                   className="ml-auto t3 hover:text-[var(--accent)] transition-colors text-sm"
                   title="发音"
                 >
-                  🔊
+                  <Icon name="speaker" size={15} />
                 </button>
                 <button
                   onClick={(ev) => {

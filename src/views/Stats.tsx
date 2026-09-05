@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getApp, getTodayStats, type TodayStats } from "../lib/db";
+import { Icon } from "../components/Icon";
 
 interface DayCount {
   date: string; // YYYY-MM-DD（本地时区）
@@ -135,9 +136,9 @@ export default function Stats({ onBack }: { onBack: () => void }) {
         <div className="surface rounded-2xl px-5 py-4 grid grid-cols-2 gap-4 text-center">
           <div>
             <p className="text-3xl font-light tabular-nums t1">
-              {streak} <span className="text-base">🔥</span>
+              {streak}
             </p>
-            <p className="mt-1 text-xs t3">连续学习天数</p>
+            <p className="mt-1 text-xs t3 inline-flex items-center gap-1"><Icon name="flame" size={13} className="accent-text" /> 连续天数</p>
           </div>
           <div>
             <p className="text-3xl font-light tabular-nums t1">{totalReviews}</p>
