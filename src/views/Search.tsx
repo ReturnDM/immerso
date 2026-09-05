@@ -23,6 +23,7 @@ export default function Search({ onBack }: { onBack: () => void }) {
   const [open, setOpen] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [added, setAdded] = useState<Record<string, AddState>>({});
+  const [contexts, setContexts] = useState<Record<string, string>>({});
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -53,7 +54,7 @@ export default function Search({ onBack }: { onBack: () => void }) {
 
   const add = async (word: string) => {
     setAdded((m) => ({ ...m, [word]: "adding" }));
-    const r = await addCard(word);
+    const r = await addCard(word, contexts[word]);
     setAdded((m) => ({ ...m, [word]: r === "added" ? "added" : "exists" }));
   };
 
@@ -130,6 +131,31 @@ export default function Search({ onBack }: { onBack: () => void }) {
                   <Translation text={e.translation} />
                   {e.definition && (
                     <p className="text-zinc-500 italic leading-relaxed">{e.definition}</p>
+                  )}
+                  {(added[e.word] ?? "idle") === "idle" && (
+                    <div className="pt-1 flex items-center gap-2">
+                      <input
+                        value={contexts[e.word] ?? ""}
+                        onChange={(ev) =>
+                          setContexts((m) => ({ ...m, [e.word]: ev.target.value }))
+                        }
+                        onKeyDown={(ev) => ev.stopPropagation()}
+                        placeholder="收词时的原句（可选）"
+                        spellCheck={false}
+                        className="flex-1 rounded-xl bg-zinc-900 border border-zinc-800 px-3 py-1.5
+                                   text-xs outline-none placeholder:text-zinc-600 focus:border-teal-700 transition-colors"
+                      />
+                      <button
+                        onClick={(ev) => {
+                          ev.stopPropagation();
+                          add(e.word);
+                        }}
+                        className="text-xs border rounded-full px-3 py-1 border-teal-900 text-teal-400
+                                   hover:bg-teal-950/50 transition-colors shrink-0"
+                      >
+                        带原句收入
+                      </button>
+                    </div>
                   )}
                 </div>
               ) : (

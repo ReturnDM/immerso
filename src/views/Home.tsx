@@ -4,9 +4,10 @@ import { getTodayStats, type TodayStats } from "../lib/db";
 interface Props {
   onStart: () => void;
   onSearch: () => void;
+  onSettings: () => void;
 }
 
-export default function Home({ onStart, onSearch }: Props) {
+export default function Home({ onStart, onSearch, onSettings }: Props) {
   const [stats, setStats] = useState<TodayStats | null>(null);
 
   useEffect(() => {
@@ -28,12 +29,20 @@ export default function Home({ onStart, onSearch }: Props) {
 
   return (
     <div className="min-h-screen flex flex-col items-center px-6 py-10">
-      <button
-        onClick={onSearch}
-        className="self-end text-sm text-zinc-500 hover:text-teal-400 transition-colors"
-      >
-        查词 ↗
-      </button>
+      <div className="w-full max-w-3xl self-center flex items-center text-sm">
+        <button
+          onClick={onSettings}
+          className="text-zinc-500 hover:text-teal-400 transition-colors"
+        >
+          设置
+        </button>
+        <button
+          onClick={onSearch}
+          className="ml-auto text-zinc-500 hover:text-teal-400 transition-colors"
+        >
+          查词 ↗
+        </button>
+      </div>
 
       <div className="flex-1 flex flex-col items-center justify-center text-center">
         {total > 0 ? (

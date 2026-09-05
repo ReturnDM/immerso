@@ -2,9 +2,6 @@ import Database from "@tauri-apps/plugin-sql";
 import type { Card, Grade, RecordLogItem } from "ts-fsrs";
 import { toCard } from "./fsrs";
 
-// 夜 3 做设置页后从 settings 表读；先用常量
-export const DEFAULT_DAILY_NEW = 10;
-
 let dictP: Promise<Database> | null = null;
 let appP: Promise<Database> | null = null;
 export const getDict = () => (dictP ??= Database.load("sqlite:dict.db"));
@@ -80,15 +77,54 @@ async function dictEntries(words: string[]): Promise<Map<string, DictEntry>> {
   return map;
 }
 
+// ---------- 设置 ----------
+
+export async function getSetting(key: string): Promise<string | null> {
+  const db = await getApp();
+  const rows = await db.select<{ value: string }[]>(
+    "SELECT value FROM settings WHERE key = ?",
+    [key],
+  );
+  return rows[0]?.value ?? null;
+}
+
+export async function setSetting(key: string, value: string): Promise<void> {
+  const db = await getApp();
+  await db.execute(
+    "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    [key, value],
+  );
+}
+
+export const DEFAULT_DAILY_NEW = 10;
+
+export async function getDailyNew(): Promise<number> {
+  const v = Number(await getSetting("daily_new"));
+  return Number.isFinite(v) && v >= 1 ? Math.floor(v) : DEFAULT_DAILY_NEW;
+}
+
 // ---------- 卡片 ----------
 
-export async function addCard(word: string): Promise<"added" | "exists"> {
+export async function addCard(word: string, context?: string): Promise<"added" | "exists"> {
   const db = await getApp();
-  const res = await db.execute(
-    "INSERT INTO cards (word) VALUES (?) ON CONFLICT(word) DO NOTHING",
+  const dup = await db.select<{ id: number }[]>(
+    "SELECT id FROM cards WHERE word = ? COLLATE NOCASE",
     [word],
   );
-  return res.rowsAffected > 0 ? "added" : "exists";
+  if (dup.length > 0) return "exists";
+  let sourceId: number | null = null;
+  if (context && context.trim()) {
+    const src = await db.execute(
+      "INSERT INTO sources (kind, context, ref) VALUES ('manual', ?, '手动查词')",
+      [context.trim()],
+    );
+    sourceId = src.lastInsertId ?? null;
+  }
+  await db.execute(
+    "INSERT INTO cards (word, source_id) VALUES (?, ?) ON CONFLICT(word) DO NOTHING",
+    [word, sourceId],
+  );
+  return "added";
 }
 
 export interface TodayStats {
@@ -111,7 +147,7 @@ async function newQuotaLeft(db: Database): Promise<number> {
     "SELECT COUNT(*) n FROM cards WHERE reps = 1 AND last_review >= ?",
     [localDayStartISO()],
   );
-  return Math.max(0, DEFAULT_DAILY_NEW - introduced);
+  return Math.max(0, (await getDailyNew()) - introduced);
 }
 
 export async function getTodayStats(): Promise<TodayStats> {
