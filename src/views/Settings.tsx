@@ -9,6 +9,7 @@ import {
 import { EX_MODES, type ExMode } from "../lib/exercises";
 import { lastSyncText, neathSync } from "../lib/neath";
 import { changeTheme, currentTheme, type Theme } from "../lib/theme";
+import { exportData, importData } from "../lib/sync";
 import { Icon } from "../components/Icon";
 
 function Segmented<T extends string>({
@@ -77,6 +78,7 @@ export default function Settings({ onBack }: { onBack: () => void }) {
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [lastSync, setLastSync] = useState<string | null>(null);
+  const [dataMsg, setDataMsg] = useState<string | null>(null);
 
   useEffect(() => {
     getDailyNew().then((v) => setQuota(String(v)));
@@ -211,6 +213,34 @@ export default function Settings({ onBack }: { onBack: () => void }) {
               }`}
             />
           </button>
+        </div>
+
+        {/* 数据同步 */}
+        <div className="surface rounded-xl px-5 py-4">
+          <p className="t1 text-sm">双设备同步</p>
+          <p className="mt-1 text-xs t3">
+            Windows 和 Mac 之间互导数据包（含复习记录）。合并规则：同一张卡取学得较新的那台，记录去重补插。
+          </p>
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              onClick={() => void exportData().then(setDataMsg)}
+              className="text-xs t3 border border-[var(--border)] rounded-md px-3 py-1.5
+                         hover:border-[var(--accent)] accent-text transition-colors"
+            >
+              导出数据包
+            </button>
+            <button
+              onClick={() => void importData().then(setDataMsg)}
+              className="text-xs t3 border border-[var(--border)] rounded-md px-3 py-1.5
+                         hover:border-[var(--accent)] accent-text transition-colors"
+            >
+              导入合并
+            </button>
+          </div>
+          {dataMsg && <p className="mt-3 text-xs t2 break-all">{dataMsg}</p>}
+          <p className="mt-3 text-[11px] t4">
+            匿词收藏无需备份——两台设备各自同步一遍即是同一份
+          </p>
         </div>
 
         {/* 匿词同步 */}

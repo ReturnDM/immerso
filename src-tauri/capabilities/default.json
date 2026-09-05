@@ -12,9 +12,14 @@
     "core:window:allow-toggle-maximize",
     "core:window:allow-close",
     "core:window:allow-start-dragging",
+    "dialog:default",
     {
       "identifier": "fs:allow-read-text-file",
-      "allow": [{ "path": "$HOME/.neath-api-key" }]
+      "allow": [{ "path": "**" }]
+    },
+    {
+      "identifier": "fs:allow-write-text-file",
+      "allow": [{ "path": "**" }]
     },
     {
       "identifier": "http:default",
