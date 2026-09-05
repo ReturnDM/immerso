@@ -11,6 +11,8 @@ CREATE TABLE IF NOT EXISTS cards (
   last_review TEXT,
   state INTEGER NOT NULL DEFAULT 0,
   step INTEGER NOT NULL DEFAULT 0,
+  reps INTEGER NOT NULL DEFAULT 0,
+  lapses INTEGER NOT NULL DEFAULT 0,
   suspended INTEGER NOT NULL DEFAULT 0,
   added_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
