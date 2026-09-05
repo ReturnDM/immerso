@@ -5,13 +5,20 @@
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync, readFileSync, existsSync, statSync, unlinkSync } from "node:fs";
 import { join, dirname } from "node:path";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const csvPath = process.env.ECDICT_CSV ?? join(root, ".cache", "ecdict.csv");
 const dataDir =
   process.env.IMMERSO_DATA_DIR ??
-  join(process.env.APPDATA ?? join(root, ".data"), "com.returndm.immerso");
+  join(
+    process.env.APPDATA ??
+      (process.platform === "darwin"
+        ? join(homedir(), "Library", "Application Support")
+        : join(homedir(), ".local", "share")),
+    "com.returndm.immerso",
+  );
 const dbPath = join(dataDir, "dict.db");
 
 if (!existsSync(csvPath)) {

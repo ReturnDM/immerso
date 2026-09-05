@@ -18,7 +18,7 @@
 }
 
 :root {
-  font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  font-family: -apple-system, "SF Pro Text", "PingFang SC", "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
 }
 
 /* 主题令牌：深色 = 墨潭，浅色 = 宣纸；强调色 = 青瓷 */
@@ -69,7 +69,7 @@ body {
 
 /* 单词展示：字典衬线 */
 .word-serif {
-  font-family: Georgia, "Times New Roman", "Noto Serif SC", "Source Han Serif SC", serif;
+  font-family: Georgia, "Times New Roman", "Palatino", "Songti SC", "Noto Serif SC", "Source Han Serif SC", serif;
 }
 
 @layer components {

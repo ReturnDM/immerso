@@ -5,10 +5,14 @@
 // 标签→词库：zk中考 gk高考 cet4四级 cet6六级 ky考研 toefl托福 ielts雅思 gre GRE
 import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
+import { homedir } from "node:os";
 
-const dataDir =
-  process.env.IMMERSO_DATA_DIR ??
-  join(process.env.APPDATA ?? ".data", "com.returndm.immerso");
+// 应用数据目录：Windows %APPDATA% / macOS ~/Library/Application Support
+const platformDataDir =
+  process.platform === "darwin"
+    ? join(homedir(), "Library", "Application Support")
+    : join(process.env.APPDATA ?? join(homedir(), ".data"));
+const dataDir = process.env.IMMERSO_DATA_DIR ?? join(platformDataDir, "com.returndm.immerso");
 const dictDb = new DatabaseSync(join(dataDir, "dict.db"), { readOnly: true });
 const appDb = new DatabaseSync(join(dataDir, "immerso.db"));
 
