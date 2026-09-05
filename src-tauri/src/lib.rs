@@ -1,9 +1,6 @@
 use tauri_plugin_sql::{Migration, MigrationKind};
 
-const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    description: "create_core_tables",
-    sql: r#"
+const CORE_SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS cards (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   word TEXT NOT NULL UNIQUE,
@@ -46,9 +43,16 @@ CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
-"#,
-    kind: MigrationKind::Up,
-}];
+"#;
+
+fn migrations() -> Vec<Migration> {
+    vec![Migration {
+        version: 1,
+        description: "create_core_tables",
+        sql: CORE_SCHEMA,
+        kind: MigrationKind::Up,
+    }]
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -56,7 +60,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(
             tauri_plugin_sql::Builder::default()
-                .add_migrations("sqlite:immerso.db", MIGRATIONS.to_vec())
+                .add_migrations("sqlite:immerso.db", migrations())
                 .build(),
         )
         .run(tauri::generate_context!())
