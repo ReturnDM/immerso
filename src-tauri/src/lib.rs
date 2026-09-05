@@ -48,12 +48,20 @@ CREATE TABLE IF NOT EXISTS settings (
 "#;
 
 fn migrations() -> Vec<Migration> {
-    vec![Migration {
-        version: 1,
-        description: "create_core_tables",
-        sql: CORE_SCHEMA,
-        kind: MigrationKind::Up,
-    }]
+    vec![
+        Migration {
+            version: 1,
+            description: "create_core_tables",
+            sql: CORE_SCHEMA,
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 2,
+            description: "add_deck_to_cards",
+            sql: "ALTER TABLE cards ADD COLUMN deck TEXT NOT NULL DEFAULT '生词本';",
+            kind: MigrationKind::Up,
+        },
+    ]
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

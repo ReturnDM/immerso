@@ -4,9 +4,10 @@ import Search from "./views/Search";
 import Review from "./views/Review";
 import Settings from "./views/Settings";
 import Stats from "./views/Stats";
+import Library from "./views/Library";
 import TitleBar from "./TitleBar";
 
-type View = "home" | "search" | "review" | "settings" | "stats";
+type View = "home" | "search" | "review" | "settings" | "stats" | "library";
 
 export default function App() {
   const [view, setView] = useState<View>("home");
@@ -18,12 +19,14 @@ export default function App() {
       {view === "review" && <Review onExit={() => setView("home")} />}
       {view === "settings" && <Settings onBack={() => setView("home")} />}
       {view === "stats" && <Stats onBack={() => setView("home")} />}
+      {view === "library" && <Library onBack={() => setView("home")} />}
       {view === "home" && (
         <Home
           onStart={() => setView("review")}
           onSearch={() => setView("search")}
           onSettings={() => setView("settings")}
           onStats={() => setView("stats")}
+          onLibrary={() => setView("library")}
         />
       )}
     </>

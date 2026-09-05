@@ -2,6 +2,9 @@ import Database from "@tauri-apps/plugin-sql";
 import type { Card, Grade, RecordLogItem } from "ts-fsrs";
 import { toCard } from "./fsrs";
 
+export const DEFAULT_DAILY_NEW = 10;
+export const DEFAULT_DECK = "生词本";
+
 let dictP: Promise<Database> | null = null;
 let appP: Promise<Database> | null = null;
 export const getDict = () => (dictP ??= Database.load("sqlite:dict.db"));
@@ -19,6 +22,7 @@ interface CardRow {
   id: number;
   word: string;
   source_id: number | null;
+  deck: string;
   stability: number;
   difficulty: number;
   due: string | null;
@@ -33,6 +37,7 @@ export interface QueueItem {
   id: number;
   word: string;
   isNew: boolean;
+  deck: string;
   card: Card;
   sourceContext: string | null;
   dict: DictEntry | null;
@@ -43,6 +48,59 @@ function localDayStartISO(): string {
   const d = new Date();
   d.setHours(0, 0, 0, 0);
   return d.toISOString();
+}
+
+// ---------- 设置 ----------
+
+export async function getSetting(key: string): Promise<string | null> {
+  const db = await getApp();
+  const rows = await db.select<{ value: string }[]>(
+    "SELECT value FROM settings WHERE key = ?",
+    [key],
+  );
+  return rows[0]?.value ?? null;
+}
+
+export async function setSetting(key: string, value: string): Promise<void> {
+  const db = await getApp();
+  await db.execute(
+    "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    [key, value],
+  );
+}
+
+export async function getDailyNew(): Promise<number> {
+  const v = Number(await getSetting("daily_new"));
+  return Number.isFinite(v) && v >= 1 ? Math.floor(v) : DEFAULT_DAILY_NEW;
+}
+
+// ---------- 词库（deck） ----------
+
+export interface DeckInfo {
+  name: string;
+  total: number;
+  learned: number;
+}
+
+export async function getDecks(): Promise<DeckInfo[]> {
+  const db = await getApp();
+  return db.select<DeckInfo[]>(
+    `SELECT deck AS name, COUNT(*) AS total,
+            SUM(CASE WHEN state != 0 THEN 1 ELSE 0 END) AS learned
+     FROM cards GROUP BY deck ORDER BY total DESC`,
+  );
+}
+
+export async function getCurrentDeck(): Promise<string> {
+  return (await getSetting("current_deck")) ?? "全部";
+}
+
+export const setCurrentDeck = (d: string) => setSetting("current_deck", d);
+
+function deckClause(deck: string): { sql: string; params: string[] } {
+  return deck && deck !== "全部"
+    ? { sql: " AND c.deck = ?", params: [deck] }
+    : { sql: "", params: [] };
 }
 
 // ---------- 词典 ----------
@@ -77,35 +135,13 @@ async function dictEntries(words: string[]): Promise<Map<string, DictEntry>> {
   return map;
 }
 
-// ---------- 设置 ----------
-
-export async function getSetting(key: string): Promise<string | null> {
-  const db = await getApp();
-  const rows = await db.select<{ value: string }[]>(
-    "SELECT value FROM settings WHERE key = ?",
-    [key],
-  );
-  return rows[0]?.value ?? null;
-}
-
-export async function setSetting(key: string, value: string): Promise<void> {
-  const db = await getApp();
-  await db.execute(
-    "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-    [key, value],
-  );
-}
-
-export const DEFAULT_DAILY_NEW = 10;
-
-export async function getDailyNew(): Promise<number> {
-  const v = Number(await getSetting("daily_new"));
-  return Number.isFinite(v) && v >= 1 ? Math.floor(v) : DEFAULT_DAILY_NEW;
-}
-
 // ---------- 卡片 ----------
 
-export async function addCard(word: string, context?: string): Promise<"added" | "exists"> {
+export async function addCard(
+  word: string,
+  context?: string,
+  deck: string = DEFAULT_DECK,
+): Promise<"added" | "exists"> {
   const db = await getApp();
   const dup = await db.select<{ id: number }[]>(
     "SELECT id FROM cards WHERE word = ? COLLATE NOCASE",
@@ -121,8 +157,8 @@ export async function addCard(word: string, context?: string): Promise<"added" |
     sourceId = src.lastInsertId ?? null;
   }
   await db.execute(
-    "INSERT INTO cards (word, source_id) VALUES (?, ?) ON CONFLICT(word) DO NOTHING",
-    [word, sourceId],
+    "INSERT INTO cards (word, source_id, deck) VALUES (?, ?, ?) ON CONFLICT(word) DO NOTHING",
+    [word, sourceId, deck],
   );
   return "added";
 }
@@ -140,57 +176,65 @@ async function count(db: Database, sql: string, params: unknown[] = []): Promise
   return rows[0]?.n ?? 0;
 }
 
-async function newQuotaLeft(db: Database): Promise<number> {
+async function newQuotaLeft(db: Database, deck: string): Promise<number> {
   // reps = 1 且首次复习在今天 ⇒ 今天新引入的卡
+  const { sql: dc, params: dp } = deckClause(deck);
   const introduced = await count(
     db,
-    "SELECT COUNT(*) n FROM cards WHERE reps = 1 AND last_review >= ?",
-    [localDayStartISO()],
+    `SELECT COUNT(*) n FROM cards c WHERE c.reps = 1 AND c.last_review >= ?${dc}`,
+    [localDayStartISO(), ...dp],
   );
   return Math.max(0, (await getDailyNew()) - introduced);
 }
 
-export async function getTodayStats(): Promise<TodayStats> {
+export async function getTodayStats(deck: string): Promise<TodayStats> {
   const db = await getApp();
   const now = new Date().toISOString();
+  const { sql: dc, params: dp } = deckClause(deck);
   const reviewCount = await count(
     db,
-    "SELECT COUNT(*) n FROM cards WHERE suspended = 0 AND state != 0 AND due <= ?",
-    [now],
+    `SELECT COUNT(*) n FROM cards c WHERE c.suspended = 0 AND c.state != 0 AND c.due <= ?${dc}`,
+    [now, ...dp],
   );
   const availableNew = await count(
     db,
-    "SELECT COUNT(*) n FROM cards WHERE suspended = 0 AND state = 0",
+    `SELECT COUNT(*) n FROM cards c WHERE c.suspended = 0 AND c.state = 0${dc}`,
+    dp,
   );
-  const newCount = Math.min(await newQuotaLeft(db), availableNew);
+  const newCount = Math.min(await newQuotaLeft(db, deck), availableNew);
   const doneToday = await count(
     db,
     "SELECT COUNT(*) n FROM reviews WHERE reviewed_at >= ?",
     [localDayStartISO()],
   );
-  const library = await count(db, "SELECT COUNT(*) n FROM cards");
+  const library = await count(
+    db,
+    `SELECT COUNT(*) n FROM cards c WHERE 1=1${dc}`,
+    dp,
+  );
   return { reviewCount, newCount, total: reviewCount + newCount, doneToday, library };
 }
 
-export async function getQueue(): Promise<QueueItem[]> {
+export async function getQueue(deck: string): Promise<QueueItem[]> {
   const db = await getApp();
   const now = new Date().toISOString();
-  const cols = `c.id, c.word, c.source_id, c.stability, c.difficulty, c.due, c.last_review,
-                c.state, c.reps, c.lapses, s.context AS source_context`;
+  const { sql: dc, params: dp } = deckClause(deck);
+  const cols = `c.id, c.word, c.source_id, c.deck, c.stability, c.difficulty, c.due,
+                c.last_review, c.state, c.reps, c.lapses, s.context AS source_context`;
   const due = await db.select<CardRow[]>(
     `SELECT ${cols} FROM cards c LEFT JOIN sources s ON s.id = c.source_id
-     WHERE c.suspended = 0 AND c.state != 0 AND c.due <= ?
+     WHERE c.suspended = 0 AND c.state != 0 AND c.due <= ?${dc}
      ORDER BY c.due LIMIT 500`,
-    [now],
+    [now, ...dp],
   );
-  const quota = await newQuotaLeft(db);
+  const quota = await newQuotaLeft(db, deck);
   const fresh =
     quota > 0
       ? await db.select<CardRow[]>(
           `SELECT ${cols} FROM cards c LEFT JOIN sources s ON s.id = c.source_id
-           WHERE c.suspended = 0 AND c.state = 0
+           WHERE c.suspended = 0 AND c.state = 0${dc}
            ORDER BY c.id LIMIT ?`,
-          [quota],
+          [...dp, quota],
         )
       : [];
   const rows = [...due, ...fresh];
@@ -199,6 +243,7 @@ export async function getQueue(): Promise<QueueItem[]> {
     id: r.id,
     word: r.word,
     isNew: r.state === 0,
+    deck: r.deck,
     card: toCard(r),
     sourceContext: r.source_context,
     dict: dict.get(r.word.toLowerCase()) ?? null,
@@ -224,4 +269,57 @@ export async function applyReview(
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
     [item.id, grade, item.card.state, c.stability, c.difficulty, dueISO, Math.round(durationMs)],
   );
+}
+
+// ---------- 词库浏览 ----------
+
+export interface LibCard {
+  id: number;
+  word: string;
+  state: number;
+  reps: number;
+  due: string | null;
+  deck: string;
+  suspended: number;
+}
+
+export type LibFilter = "all" | "new" | "learned";
+
+export async function getLibrary(
+  deck: string,
+  filter: LibFilter,
+  q: string,
+): Promise<LibCard[]> {
+  const db = await getApp();
+  const conds: string[] = ["1=1"];
+  const params: unknown[] = [];
+  if (deck && deck !== "全部") {
+    conds.push("deck = ?");
+    params.push(deck);
+  }
+  if (filter === "new") conds.push("state = 0");
+  if (filter === "learned") conds.push("state != 0");
+  if (q.trim()) {
+    conds.push("word LIKE ?");
+    params.push(q.trim() + "%");
+  }
+  params.push(200);
+  return db.select<LibCard[]>(
+    `SELECT id, word, state, reps, due, deck, suspended FROM cards
+     WHERE ${conds.join(" AND ")} ORDER BY id LIMIT ?`,
+    params,
+  );
+}
+
+export async function setCardSuspended(id: number, suspended: boolean): Promise<void> {
+  const db = await getApp();
+  await db.execute("UPDATE cards SET suspended = ? WHERE id = ?", [suspended ? 1 : 0, id]);
+}
+
+export async function deleteCard(id: number): Promise<void> {
+  const db = await getApp();
+  await db.execute("DELETE FROM reviews WHERE card_id = ?", [id]);
+  await db.execute("UPDATE cards SET source_id = NULL WHERE id = ? AND source_id IS NOT NULL", [id]);
+  await db.execute("DELETE FROM sources WHERE id NOT IN (SELECT source_id FROM cards WHERE source_id IS NOT NULL)");
+  await db.execute("DELETE FROM cards WHERE id = ?", [id]);
 }

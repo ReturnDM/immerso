@@ -19,8 +19,68 @@
   font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
 }
 
+/* 主题令牌：深色默认，html[data-theme="light"] 整体切换 */
+:root,
+html[data-theme="dark"] {
+  --bg: #0f1115;
+  --text: #e6e8ee;
+  --t2: #aab0bc;
+  --t3: #828896;
+  --t4: #565c68;
+  --panel: rgba(23, 26, 33, 0.6);
+  --border: rgba(56, 61, 72, 0.9);
+  --input: #16181e;
+  --hover: rgba(44, 48, 58, 0.5);
+  --accent: #2dd4bf;
+  --heat-0: rgba(56, 61, 72, 0.5);
+}
+
+html[data-theme="light"] {
+  --bg: #f4f5f7;
+  --text: #1c1e24;
+  --t2: #4b5058;
+  --t3: #71767f;
+  --t4: #a0a5ae;
+  --panel: #ffffff;
+  --border: #e2e4e9;
+  --input: #ffffff;
+  --hover: #eceef2;
+  --accent: #0d9488;
+  --heat-0: #e3e5ea;
+}
+
 body {
   margin: 0;
-  background: #0f1115;
-  color: #e6e8ee;
+  background: var(--bg);
+  color: var(--text);
+}
+
+@layer components {
+  .surface {
+    background: var(--panel);
+    border: 1px solid var(--border);
+  }
+  .field {
+    background: var(--input);
+    border: 1px solid var(--border);
+  }
+  .t1 { color: var(--text); }
+  .t2 { color: var(--t2); }
+  .t3 { color: var(--t3); }
+  .t4 { color: var(--t4); }
+  .accent-text { color: var(--accent); }
+  .link {
+    color: var(--t3);
+    transition: color 0.15s;
+  }
+  .link:hover {
+    color: var(--accent);
+  }
+  .link-strong {
+    color: var(--t3);
+    transition: color 0.15s;
+  }
+  .link-strong:hover {
+    color: var(--text);
+  }
 }

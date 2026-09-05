@@ -59,7 +59,7 @@ function heatGrid(days: DayCount[]): { date: string; count: number }[][] {
 }
 
 function heatColor(n: number): string {
-  if (n === 0) return "bg-zinc-800/50";
+  if (n === 0) return "bg-[var(--heat-0)]";
   if (n <= 2) return "bg-teal-900";
   if (n <= 5) return "bg-teal-700";
   if (n <= 9) return "bg-teal-500";
@@ -72,7 +72,7 @@ function Ring({ p, done, total }: { p: number; done: number; total: number }) {
   return (
     <div className="relative w-40 h-40">
       <svg viewBox="0 0 140 140" className="w-full h-full -rotate-90">
-        <circle cx="70" cy="70" r={r} fill="none" strokeWidth="7" className="stroke-zinc-800/70" />
+        <circle cx="70" cy="70" r={r} fill="none" strokeWidth="7" className="stroke-[var(--heat-0)]" />
         <circle
           cx="70" cy="70" r={r} fill="none" strokeWidth="7" strokeLinecap="round"
           className="stroke-teal-500 transition-[stroke-dasharray] duration-700"
@@ -80,8 +80,8 @@ function Ring({ p, done, total }: { p: number; done: number; total: number }) {
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-3xl font-light tabular-nums">{done}</span>
-        <span className="text-xs text-zinc-500">/ {total} 次</span>
+        <span className="text-3xl font-light tabular-nums t1">{done}</span>
+        <span className="text-xs t3">/ {total} 次</span>
       </div>
     </div>
   );
@@ -93,7 +93,7 @@ export default function Stats({ onBack }: { onBack: () => void }) {
   const [totalReviews, setTotalReviews] = useState(0);
 
   useEffect(() => {
-    getTodayStats().then(setStats);
+    getTodayStats("全部").then(setStats);
     loadReviewDays().then(setDays);
     getApp().then((db) =>
       db.select<{ n: number }[]>("SELECT COUNT(*) n FROM reviews").then(
@@ -112,45 +112,42 @@ export default function Stats({ onBack }: { onBack: () => void }) {
   return (
     <div className="min-h-screen flex flex-col items-center px-6 pt-12 pb-10">
       <div className="w-full max-w-xl flex items-center">
-        <button
-          onClick={onBack}
-          className="text-sm text-zinc-500 hover:text-zinc-200 transition-colors"
-        >
+        <button onClick={onBack} className="link-strong text-sm">
           ← 首页
         </button>
-        <span className="mx-auto text-sm tracking-widest text-zinc-400 select-none">统 计</span>
+        <span className="mx-auto text-sm tracking-widest t2 select-none">统 计</span>
         <span className="w-10" />
       </div>
 
       <div className="mt-8 w-full max-w-xl flex flex-col gap-4">
         {/* 今日进度环 */}
-        <div className="rounded-2xl bg-zinc-900/60 border border-zinc-800/80 px-5 py-6 flex items-center gap-8">
+        <div className="surface rounded-2xl px-5 py-6 flex items-center gap-8">
           <Ring p={p} done={done} total={done + remaining} />
-          <div className="text-sm text-zinc-400 space-y-2">
+          <div className="text-sm t2 space-y-2">
             <p>今日进度 {Math.round(p * 100)}%</p>
-            <p className="text-zinc-500">
+            <p className="t3">
               还剩 {remaining} 次 · 词库 {library} 张卡
             </p>
           </div>
         </div>
 
         {/* 连续与累计 */}
-        <div className="rounded-2xl bg-zinc-900/60 border border-zinc-800/80 px-5 py-4 grid grid-cols-2 gap-4 text-center">
+        <div className="surface rounded-2xl px-5 py-4 grid grid-cols-2 gap-4 text-center">
           <div>
-            <p className="text-3xl font-light tabular-nums">
+            <p className="text-3xl font-light tabular-nums t1">
               {streak} <span className="text-base">🔥</span>
             </p>
-            <p className="mt-1 text-xs text-zinc-500">连续学习天数</p>
+            <p className="mt-1 text-xs t3">连续学习天数</p>
           </div>
           <div>
-            <p className="text-3xl font-light tabular-nums">{totalReviews}</p>
-            <p className="mt-1 text-xs text-zinc-500">累计复习次数</p>
+            <p className="text-3xl font-light tabular-nums t1">{totalReviews}</p>
+            <p className="mt-1 text-xs t3">累计复习次数</p>
           </div>
         </div>
 
         {/* 热力图 */}
-        <div className="rounded-2xl bg-zinc-900/60 border border-zinc-800/80 px-5 py-4">
-          <p className="text-zinc-200 text-sm">近 17 周</p>
+        <div className="surface rounded-2xl px-5 py-4">
+          <p className="t1 text-sm">近 17 周</p>
           <div className="mt-3 flex gap-[3px] overflow-x-auto pb-1">
             {grid.map((week, i) => (
               <div key={i} className="flex flex-col gap-[3px]">
@@ -169,9 +166,9 @@ export default function Stats({ onBack }: { onBack: () => void }) {
               </div>
             ))}
           </div>
-          <div className="mt-2 flex items-center gap-1 text-[10px] text-zinc-600 justify-end">
+          <div className="mt-2 flex items-center gap-1 text-[10px] t4 justify-end">
             少
-            <span className="w-3 h-3 rounded-[3px] bg-zinc-800/50" />
+            <span className="w-3 h-3 rounded-[3px] bg-[var(--heat-0)]" />
             <span className="w-3 h-3 rounded-[3px] bg-teal-900" />
             <span className="w-3 h-3 rounded-[3px] bg-teal-700" />
             <span className="w-3 h-3 rounded-[3px] bg-teal-500" />
