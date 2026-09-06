@@ -314,7 +314,7 @@ export async function getLibrary(
   const conds: string[] = ["1=1"];
   const params: unknown[] = [];
   if (deck && deck !== "全部") {
-    conds.push("deck = ?");
+    conds.push("EXISTS (SELECT 1 FROM deck_words dw WHERE dw.word = cards.word AND dw.deck = ?)");
     params.push(deck);
   }
   if (filter === "new") conds.push("state = 0");
@@ -329,6 +329,45 @@ export async function getLibrary(
      WHERE ${conds.join(" AND ")} ORDER BY id LIMIT ?`,
     params,
   );
+}
+
+/** 一批词各自拥有的全部词书标签 */
+export async function getWordDecks(words: string[]): Promise<Map<string, string[]>> {
+  const map = new Map<string, string[]>();
+  if (words.length === 0) return map;
+  const db = await getApp();
+  for (let i = 0; i < words.length; i += 200) {
+    const chunk = words.slice(i, i + 200);
+    const rows = await db.select<{ word: string; deck: string }[]>(
+      `SELECT word, deck FROM deck_words
+       WHERE word COLLATE NOCASE IN (${chunk.map(() => "?").join(",")})`,
+      chunk,
+    );
+    for (const r of rows) {
+      const k = r.word.toLowerCase();
+      if (!map.has(k)) map.set(k, []);
+      map.get(k)!.push(r.deck);
+    }
+  }
+  return map;
+}
+
+/** 所有词书名（含只出现在 deck_words 里的自建词书） */
+export async function getAllDeckNames(): Promise<string[]> {
+  const db = await getApp();
+  const rows = await db.select<{ deck: string }[]>(
+    "SELECT DISTINCT deck FROM deck_words ORDER BY deck",
+  );
+  return rows.map((r) => r.deck);
+}
+
+/** 把词加入另一本词书（新词书名即自建） */
+export async function addWordToDeck(word: string, deck: string): Promise<void> {
+  const db = await getApp();
+  await db.execute("INSERT OR IGNORE INTO deck_words (word, deck) VALUES (?, ?)", [
+    word,
+    deck.trim(),
+  ]);
 }
 
 export async function setCardSuspended(id: number, suspended: boolean): Promise<void> {
