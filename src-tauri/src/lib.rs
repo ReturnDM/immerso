@@ -94,7 +94,7 @@ fn toggle_quick(app: &tauri::AppHandle) {
         let _ = w.emit("quick-show", ());
         return;
     }
-    let _ = tauri::WebviewWindowBuilder::new(
+    let mut builder = tauri::WebviewWindowBuilder::new(
         app,
         "quick",
         tauri::WebviewUrl::App("index.html".into()),
@@ -102,13 +102,16 @@ fn toggle_quick(app: &tauri::AppHandle) {
     .title("快速收词")
     .inner_size(440.0, 320.0)
     .decorations(false)
-    .transparent(true)
     .always_on_top(true)
     .skip_taskbar(true)
     .resizable(false)
-    .center()
-    .build()
-    .map(|w| {
+    .center();
+    // transparent() 在 macOS 需 macos-private-api 特性，不开；Mac 上小窗为不透明方角
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    {
+        builder = builder.transparent(true);
+    }
+    let _ = builder.build().map(|w| {
         let _ = w.set_focus();
         // webview 还没加载完，不 emit quick-show；QuickCapture 挂载时会自取剪贴板
     });
