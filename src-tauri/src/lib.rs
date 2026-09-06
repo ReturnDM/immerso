@@ -88,12 +88,30 @@ fn toggle_quick(app: &tauri::AppHandle) {
             let _ = w.hide();
             return;
         }
-        let _ = w.center();
-        let _ = w.show();
-        let _ = w.set_focus();
-        let _ = w.emit("quick-show", ());
+        show_quick(app, &w);
         return;
     }
+    build_quick(app);
+}
+
+/// 显示（或首次创建）快速收词小窗；划词直加遇到整句时由前端调用，把句子带入原句栏
+#[tauri::command]
+fn open_quick(app: tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("quick") {
+        show_quick(&app, &w);
+        return;
+    }
+    build_quick(&app);
+}
+
+fn show_quick(_app: &tauri::AppHandle, w: &tauri::WebviewWindow) {
+    let _ = w.center();
+    let _ = w.show();
+    let _ = w.set_focus();
+    let _ = w.emit("quick-show", ());
+}
+
+fn build_quick(app: &tauri::AppHandle) {
     let mut builder = tauri::WebviewWindowBuilder::new(
         app,
         "quick",
@@ -208,7 +226,11 @@ pub fn run() {
                 .add_migrations("sqlite:immerso.db", migrations())
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![set_quick_hotkeys, capture_selected])
+        .invoke_handler(tauri::generate_handler![
+            set_quick_hotkeys,
+            capture_selected,
+            open_quick
+        ])
         .setup(|app| {
             // 内置词典释放：安装包带 resources/dict.db 时拷到数据目录（大小不同视为新版覆盖）。
             // 不让插件直读资源绝对路径——sqlx 对 Windows 绝对路径连接串解析不可靠。

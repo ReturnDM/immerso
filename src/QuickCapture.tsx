@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { addCard, addWordToDeck, getAllDeckNames, getSetting, setSetting } from "./lib/db";
+import {
+  addCard,
+  addWordToDeck,
+  getAllDeckNames,
+  getSetting,
+  setCardContextIfEmpty,
+  setSetting,
+} from "./lib/db";
 import { cleanWord, resolveWord, type Resolved } from "./lib/capture";
 import { speak } from "./lib/fsrs";
 
@@ -9,6 +16,7 @@ const quickWin = getCurrentWebviewWindow();
 
 export default function QuickCapture() {
   const [word, setWord] = useState("");
+  const [context, setContext] = useState("");
   const [resolved, setResolved] = useState<Resolved | null>(null);
   const [decks, setDecks] = useState<string[]>([]);
   const [deck, setDeck] = useState("生词本");
@@ -17,28 +25,37 @@ export default function QuickCapture() {
   const inputRef = useRef<HTMLInputElement>(null);
   const lastPrep = useRef(0);
 
-  /** 每次呼出：读剪贴板带词、选默认词书（词条解析走下方输入防抖，统一一条路） */
+  /** 每次呼出：读剪贴板。整句（≥3 词）进原句栏待补单词；单词直接进词条 */
   const prepare = useCallback(async () => {
     // quick-show 事件与焦点事件会接连触发，去重
     if (Date.now() - lastPrep.current < 200) return;
     lastPrep.current = Date.now();
     setStatus(null);
-    let w = "";
+    let raw = "";
     try {
-      const c = await readText();
-      if (c) w = cleanWord(c);
+      raw = (await readText()) ?? "";
     } catch {
       /* 剪贴板可能是图片等非文本 */
     }
-    setWord(w);
-    setResolved(null);
+    const words = raw.trim().split(/\s+/).filter(Boolean);
+    if (words.length >= 3) {
+      setContext(raw.trim());
+      setWord("");
+      setResolved(null);
+    } else {
+      setContext("");
+      setWord(cleanWord(raw));
+      setResolved(null);
+    }
     const names = await getAllDeckNames();
     const list = names.length > 0 ? names : ["生词本"];
     setDecks(list);
     const last = await getSetting("quick_deck");
     setDeck(last && list.includes(last) ? last : list[0]);
     inputRef.current?.focus();
-    if (w && (await getSetting("auto_pronounce")) !== "off") speak(w);
+    if (words.length < 3 && words.length > 0 && (await getSetting("auto_pronounce")) !== "off") {
+      speak(cleanWord(raw));
+    }
   }, []);
 
   useEffect(() => {
@@ -83,8 +100,11 @@ export default function QuickCapture() {
         setStatus({ ok: false, text: `已在「${deck}」` });
         return;
       }
-      if (r.inDecks.length === 0) await addCard(r.cardWord, undefined, deck);
-      else await addWordToDeck(r.cardWord, deck);
+      if (r.inDecks.length === 0) await addCard(r.cardWord, context.trim() || undefined, deck);
+      else {
+        await addWordToDeck(r.cardWord, deck);
+        if (context.trim()) await setCardContextIfEmpty(r.cardWord, context.trim());
+      }
       void setSetting("quick_deck", deck);
       const via = r.viaLemma ? `（${r.viaLemma} → ${r.cardWord}）` : "";
       setStatus({ ok: true, text: `✓ ${r.cardWord}${via} 已收进「${deck}」` });
@@ -122,6 +142,17 @@ export default function QuickCapture() {
         placeholder="输入或粘贴单词…"
         spellCheck={false}
         className="word-serif mt-3 w-full bg-transparent outline-none text-2xl t1 placeholder:text-[var(--t4)] placeholder:text-lg placeholder:font-sans"
+      />
+      <input
+        value={context}
+        onChange={(e) => setContext(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") void add();
+          else if (e.key === "Escape") void quickWin.hide();
+        }}
+        placeholder="原句（可选，随词一起收）"
+        spellCheck={false}
+        className="mt-2 w-full field px-1 py-1 text-xs t2"
       />
 
       <div className="mt-1 min-h-[34px]">

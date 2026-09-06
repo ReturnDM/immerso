@@ -397,3 +397,28 @@ export async function deleteCard(id: number): Promise<void> {
   await db.execute("DELETE FROM sources WHERE id NOT IN (SELECT source_id FROM cards WHERE source_id IS NOT NULL)");
   await db.execute("DELETE FROM cards WHERE id = ?", [id]);
 }
+
+/** 给已有卡片补原句（仅在它还没有原句时写入；无 source 则建一条） */
+export async function setCardContextIfEmpty(word: string, context: string): Promise<boolean> {
+  const db = await getApp();
+  const card = (
+    await db.select<{ id: number; source_id: number | null }[]>(
+      "SELECT id, source_id FROM cards WHERE word = ? COLLATE NOCASE",
+      [word],
+    )
+  )[0];
+  if (!card) return false;
+  if (card.source_id != null) {
+    const r = await db.execute(
+      "UPDATE sources SET context = ? WHERE id = ? AND (context IS NULL OR context = '')",
+      [context, card.source_id],
+    );
+    return (r.rowsAffected ?? 0) > 0;
+  }
+  const src = await db.execute(
+    "INSERT INTO sources (kind, context, ref) VALUES ('manual', ?, '快速收词')",
+    [context],
+  );
+  await db.execute("UPDATE cards SET source_id = ? WHERE id = ?", [src.lastInsertId ?? null, card.id]);
+  return true;
+}

@@ -27,9 +27,19 @@
   .animate-fade-in {
     animation: fade-in 0.5s ease-out;
   }
-  /* 视图切换：整页淡入上浮 */
+  /* 视图转场三向：前进从右滑入、返回从左滑入、进入复习下潜聚焦 */
+  .animate-view-fwd {
+    animation: view-fwd 0.36s cubic-bezier(0.2, 0.7, 0.3, 1);
+  }
+  .animate-view-back {
+    animation: view-back 0.36s cubic-bezier(0.2, 0.7, 0.3, 1);
+  }
+  .animate-view-dive {
+    animation: view-dive 0.4s cubic-bezier(0.2, 0.7, 0.3, 1);
+  }
+  /* 弹层/面板通用淡入上浮 */
   .animate-view-in {
-    animation: view-in 0.32s cubic-bezier(0.2, 0.7, 0.3, 1);
+    animation: view-dive 0.32s cubic-bezier(0.2, 0.7, 0.3, 1);
   }
   /* 勾选/成功标记：弹入 */
   .animate-check-in {
@@ -37,14 +47,42 @@
   }
 }
 
-@keyframes view-in {
+@keyframes view-fwd {
   from {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translateX(28px);
+    filter: blur(5px);
   }
   to {
     opacity: 1;
     transform: none;
+    filter: blur(0);
+  }
+}
+
+@keyframes view-back {
+  from {
+    opacity: 0;
+    transform: translateX(-28px);
+    filter: blur(5px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
+  }
+}
+
+@keyframes view-dive {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.988);
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
   }
 }
 
