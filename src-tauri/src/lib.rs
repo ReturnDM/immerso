@@ -192,6 +192,16 @@ async fn capture_selected(app: tauri::AppHandle) -> Result<String, String> {
     .map_err(|e| e.to_string())?
 }
 
+/// 打包内置的词典路径；开发机没跑 prepare-dict-resource.mjs 时返回 None（前端回退老路径）
+#[tauri::command]
+fn bundled_dict_path(app: tauri::AppHandle) -> Option<String> {
+    app.path()
+        .resolve("resources/dict.db", tauri::path::BaseDirectory::Resource)
+        .ok()
+        .filter(|p| p.exists())
+        .map(|p| p.to_string_lossy().into_owned())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -208,10 +218,14 @@ pub fn run() {
                 .add_migrations("sqlite:immerso.db", migrations())
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![set_quick_hotkeys, capture_selected])
+        .invoke_handler(tauri::generate_handler![
+            set_quick_hotkeys,
+            capture_selected,
+            bundled_dict_path
+        ])
         .setup(|app| {
             // 默认：划词直加 Alt+Q、查词小窗 Ctrl+Shift+Space；前端起来后按设置页保存值重挂
-            if let Err(e) = register_hotkeys(app.handle(), Some("alt+q"), Some("ctrl+shift+space")) {
+            if let Err(e) = register_hotkeys(app.handle(), Some("alt+q"), Some("alt+e")) {
                 eprintln!("注册默认热键失败: {e}");
             }
             Ok(())

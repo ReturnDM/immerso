@@ -20,7 +20,7 @@ export default function App() {
   useEffect(() => {
     void (async () => {
       const direct = (await getSetting("hotkey_direct")) ?? (await getSetting("quick_hotkey")) ?? "alt+q";
-      const popup = (await getSetting("hotkey_popup")) ?? "ctrl+shift+space";
+      const popup = (await getSetting("hotkey_popup")) ?? "alt+e";
       try {
         await invoke("set_quick_hotkeys", { direct, popup });
       } catch {

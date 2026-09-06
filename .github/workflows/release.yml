@@ -43,6 +43,9 @@ jobs:
           GITHUB_REF_NAME: ${{ github.ref_name }}
         run: node scripts/release-notes.mjs
 
+      - name: 生成内置词典资源
+        run: node scripts/prepare-dict-resource.mjs
+
       - name: 构建并发布
         uses: tauri-apps/tauri-action@v0
         env:

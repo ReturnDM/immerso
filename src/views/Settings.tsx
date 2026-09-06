@@ -19,8 +19,8 @@ import { Icon } from "../components/Icon";
 
 /** 热键统一选项（macOS 上 Alt=⌥ Option，Ctrl=Control） */
 const HOTKEY_OPTIONS: { v: string; label: string }[] = [
-  { v: "alt+q", label: "Alt+Q" },
   { v: "alt+e", label: "Alt+E" },
+  { v: "alt+q", label: "Alt+Q" },
   { v: "ctrl+shift+space", label: "Ctrl+⇧空格" },
   { v: "", label: "关闭" },
 ];
@@ -155,7 +155,7 @@ export default function Settings({ onBack }: { onBack: () => void }) {
   const [cloudMsg, setCloudMsg] = useState<string | null>(null);
   const [lastCloud, setLastCloud] = useState<string | null>(null);
   const [hotkeyDirect, setHotkeyDirect] = useState("alt+q");
-  const [hotkeyPopup, setHotkeyPopup] = useState("ctrl+shift+space");
+  const [hotkeyPopup, setHotkeyPopup] = useState("alt+e");
   const [hotkeyMsg, setHotkeyMsg] = useState<string | null>(null);
 
   useEffect(() => {
@@ -164,7 +164,7 @@ export default function Settings({ onBack }: { onBack: () => void }) {
     getSetting("auto_pronounce").then((v) => setAutoSpeak(v !== "off"));
     getSetting("auto_cloud_sync").then((v) => setAutoCloud(v !== "off"));
     getSetting("hotkey_direct").then((v) => setHotkeyDirect(v ?? "alt+q"));
-    getSetting("hotkey_popup").then((v) => setHotkeyPopup(v ?? "ctrl+shift+space"));
+    getSetting("hotkey_popup").then((v) => setHotkeyPopup(v ?? "alt+e"));
     lastSyncText().then(setLastSync);
     lastCloudSyncText().then(setLastCloud);
     getGhToken().then(setGhToken);

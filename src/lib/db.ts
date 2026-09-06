@@ -1,4 +1,5 @@
 import Database from "@tauri-apps/plugin-sql";
+import { invoke } from "@tauri-apps/api/core";
 import type { Card, Grade, RecordLogItem } from "ts-fsrs";
 import { toCard } from "./fsrs";
 import { DEFAULT_MODES, parseModes, serializeModes, type ExMode } from "./exercises";
@@ -8,7 +9,30 @@ export const DEFAULT_DECK = "生词本";
 
 let dictP: Promise<Database> | null = null;
 let appP: Promise<Database> | null = null;
-export const getDict = () => (dictP ??= Database.load("sqlite:dict.db"));
+
+/**
+ * 词典库路径：安装包内置 resources/dict.db 优先（直读，零拷贝）；
+ * 开发机或老安装没带资源时回退 app 数据目录（老脚本生成的那份）。
+ * sqlx 的连接串里反斜杠会被当成转义/参数分隔，统一转正斜杠。
+ */
+async function dictFile(): Promise<string> {
+  let p: string;
+  try {
+    const bundled = await invoke<string | null>("bundled_dict_path");
+    p = bundled ?? (await legacyDictPath());
+  } catch {
+    p = await legacyDictPath();
+  }
+  return p.replace(/\\/g, "/");
+}
+
+async function legacyDictPath(): Promise<string> {
+  const { appDataDir, join } = await import("@tauri-apps/api/path");
+  return join(await appDataDir(), "dict.db");
+}
+
+export const getDict = () =>
+  (dictP ??= dictFile().then((f) => Database.load(`sqlite:${f}`)));
 export const getApp = () => (appP ??= Database.load("sqlite:immerso.db"));
 
 export interface DictEntry {

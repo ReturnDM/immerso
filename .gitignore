@@ -25,3 +25,4 @@ dist-ssr
 .cache/
 *.db
 release_body.md
+src-tauri/resources/
