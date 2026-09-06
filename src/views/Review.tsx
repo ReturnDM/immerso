@@ -9,6 +9,7 @@ import {
   type QueueItem,
 } from "../lib/db";
 import { previewOptions, speak, stateLabel } from "../lib/fsrs";
+import { maybeAutoSync } from "../lib/cloud";
 import { pickMode, type ExMode } from "../lib/exercises";
 import { Icon } from "../components/Icon";
 
@@ -45,6 +46,16 @@ const GRADE_VAR: Record<number, string> = {
 const norm = (s: string) => s.trim().toLowerCase();
 const shuffle = <T,>(a: T[]): T[] =>
   a.map((v) => [Math.random(), v] as const).sort((x, y) => x[0] - y[0]).map(([, v]) => v);
+
+/** 复习完成屏底部：后台云同步（未配置则不渲染） */
+function DoneSync() {
+  const [msg, setMsg] = useState<string | null>(null);
+  useEffect(() => {
+    maybeAutoSync().then((s) => s && setMsg(s));
+  }, []);
+  if (!msg) return null;
+  return <p className="text-xs t4">{msg}</p>;
+}
 
 export default function Review({ onExit }: { onExit: () => void }) {
   const [queue, setQueue] = useState<QueueItem[] | null>(null);
@@ -256,6 +267,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
         <button onClick={onExit} className="mt-2 border border-[var(--border)] rounded-lg px-6 py-2.5 t2 text-sm hover:border-[var(--accent)] accent-text transition-colors">
           回首页
         </button>
+        <DoneSync />
       </div>
     );
   }

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   getDailyNew,
   getEnabledModes,
@@ -10,6 +11,7 @@ import { EX_MODES, type ExMode } from "../lib/exercises";
 import { lastSyncText, neathSync } from "../lib/neath";
 import { changeTheme, currentTheme, type Theme } from "../lib/theme";
 import { exportData, importData } from "../lib/sync";
+import { clearGhToken, cloudSync, getGhToken, lastCloudSyncText, saveGhToken } from "../lib/cloud";
 import { Icon } from "../components/Icon";
 
 function Segmented<T extends string>({
@@ -79,12 +81,21 @@ export default function Settings({ onBack }: { onBack: () => void }) {
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [lastSync, setLastSync] = useState<string | null>(null);
   const [dataMsg, setDataMsg] = useState<string | null>(null);
+  const [ghToken, setGhToken] = useState<string | null>(null);
+  const [tokenInput, setTokenInput] = useState("");
+  const [autoCloud, setAutoCloud] = useState(true);
+  const [cloudBusy, setCloudBusy] = useState(false);
+  const [cloudMsg, setCloudMsg] = useState<string | null>(null);
+  const [lastCloud, setLastCloud] = useState<string | null>(null);
 
   useEffect(() => {
     getDailyNew().then((v) => setQuota(String(v)));
     getEnabledModes().then(setModes);
     getSetting("auto_pronounce").then((v) => setAutoSpeak(v !== "off"));
+    getSetting("auto_cloud_sync").then((v) => setAutoCloud(v !== "off"));
     lastSyncText().then(setLastSync);
+    lastCloudSyncText().then(setLastCloud);
+    getGhToken().then(setGhToken);
   }, []);
 
   const toggleMode = (id: ExMode) => {
@@ -215,11 +226,115 @@ export default function Settings({ onBack }: { onBack: () => void }) {
           </button>
         </div>
 
-        {/* 数据同步 */}
+        {/* 云同步 */}
         <div className="surface rounded-xl px-5 py-4">
-          <p className="t1 text-sm">双设备同步</p>
+          <div className="flex items-center">
+            <div>
+              <p className="t1 text-sm">云同步</p>
+              <p className="mt-1 text-xs t3">
+                数据自动同步到你的 GitHub 私有 Gist；两台设备配同一个 Token 即可互相同步
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                const next = !autoCloud;
+                setAutoCloud(next);
+                void setSetting("auto_cloud_sync", next ? "on" : "off");
+              }}
+              className={`ml-auto relative w-10 h-[22px] rounded-full transition-colors flex-none ${
+                autoCloud ? "bg-teal-700" : "bg-[var(--border)]"
+              }`}
+              title="打开应用和复习结束后自动同步"
+            >
+              <span
+                className={`absolute top-[3px] w-4 h-4 rounded-full bg-zinc-200 transition-all ${
+                  autoCloud ? "left-[21px]" : "left-[3px]"
+                }`}
+              />
+            </button>
+          </div>
+
+          <div className="mt-3 flex items-center gap-2">
+            {ghToken ? (
+              <>
+                <span className="text-xs accent-text">✓ 已配置（{ghToken.slice(0, 6)}…）</span>
+                <button
+                  onClick={() => void clearGhToken().then(() => setGhToken(null))}
+                  className="text-xs t4 hover:text-rose-400 transition-colors"
+                >
+                  清除
+                </button>
+              </>
+            ) : (
+              <>
+                <input
+                  value={tokenInput}
+                  onChange={(e) => setTokenInput(e.target.value)}
+                  placeholder="粘贴 GitHub Token（gist 权限）"
+                  type="password"
+                  spellCheck={false}
+                  className="flex-1 field rounded-lg px-3 py-1.5 text-xs outline-none
+                             placeholder:text-[var(--t4)] focus:border-[var(--accent)] transition-colors t1"
+                />
+                <button
+                  onClick={async () => {
+                    if (!tokenInput.trim()) return;
+                    await saveGhToken(tokenInput);
+                    setGhToken(tokenInput.trim());
+                    setTokenInput("");
+                  }}
+                  className="text-xs t3 border border-[var(--border)] rounded-md px-3 py-1.5
+                             hover:border-[var(--accent)] accent-text transition-colors flex-none"
+                >
+                  保存
+                </button>
+              </>
+            )}
+          </div>
+
+          <div className="mt-2 flex items-center gap-3 text-xs">
+            <button
+              onClick={async () => {
+                setCloudBusy(true);
+                setCloudMsg(null);
+                try {
+                  setCloudMsg(await cloudSync());
+                  setLastCloud(await lastCloudSyncText());
+                } catch (e) {
+                  setCloudMsg(`✗ ${String(e)}`);
+                } finally {
+                  setCloudBusy(false);
+                }
+              }}
+              disabled={cloudBusy || !ghToken}
+              className="t3 border border-[var(--border)] rounded-md px-3 py-1.5
+                         hover:border-[var(--accent)] accent-text transition-colors
+                         disabled:opacity-40 disabled:cursor-wait"
+            >
+              {cloudBusy ? "同步中…" : "立即同步"}
+            </button>
+            {lastCloud && <span className="t4">上次 {lastCloud}</span>}
+            {!ghToken && (
+              <button
+                onClick={() =>
+                  void openUrl(
+                    "https://github.com/settings/tokens/new?scopes=gist&description=immerso%20sync",
+                  )
+                }
+                className="link ml-auto"
+              >
+                获取 Token ↗
+              </button>
+            )}
+          </div>
+          {cloudMsg && <p className="mt-3 text-xs t2 break-all">{cloudMsg}</p>}
+        </div>
+
+        {/* 数据同步（手动兜底） */}
+        <div className="surface rounded-xl px-5 py-4">
+          <p className="t1 text-sm">导出 / 导入</p>
           <p className="mt-1 text-xs t3">
-            Windows 和 Mac 之间互导数据包（含复习记录）。合并规则：同一张卡取学得较新的那台，记录去重补插。
+            数据包备份，或在没有网络的机器之间手动搬运（合并规则：同一张卡取学得较新的那台，记录去重补插）
           </p>
           <div className="mt-3 flex items-center gap-2">
             <button

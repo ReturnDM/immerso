@@ -6,6 +6,7 @@ import {
   setCurrentDeck,
   type TodayStats,
 } from "../lib/db";
+import { maybeAutoSync } from "../lib/cloud";
 import { Icon } from "../components/Icon";
 
 interface Props {
@@ -20,6 +21,7 @@ export default function Home({ onStart, onSearch, onSettings, onStats, onLibrary
   const [stats, setStats] = useState<TodayStats | null>(null);
   const [deck, setDeck] = useState("全部");
   const [decks, setDecks] = useState<string[]>(["全部"]);
+  const [cloudStatus, setCloudStatus] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -32,6 +34,9 @@ export default function Home({ onStart, onSearch, onSettings, onStats, onLibrary
         console.error(e);
         setStats({ reviewCount: 0, newCount: 0, total: 0, doneToday: 0, library: 0 });
       }
+      // 后台自动云同步（未配置则静默跳过）
+      const s = await maybeAutoSync();
+      if (s) setCloudStatus(s.includes("✓") ? s.replace("✓ ", "") : s);
     })();
   }, []);
 
@@ -120,6 +125,7 @@ export default function Home({ onStart, onSearch, onSettings, onStats, onLibrary
           ))}
         </select>
         {stats && <span className="ml-3">{stats.library} 张卡</span>}
+        {cloudStatus && <span className="ml-3 truncate max-w-[280px]">{cloudStatus}</span>}
         <span className="ml-auto">词典 ECDICT · FSRS-5</span>
       </div>
     </div>

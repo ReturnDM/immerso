@@ -1,10 +1,10 @@
-// 设备间数据同步：导出 / 导入合并
+// 数据同步核心：备份收集 + 合并（导入合并与云同步共用）
 // 合并规则：按卡取最新（last_review 新者胜），复习记录按（词,时间,评分）去重补插
 import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { getApp } from "./db";
 
-interface BackupCard {
+export interface BackupCard {
   word: string;
   deck: string;
   state: number;
@@ -22,7 +22,7 @@ interface BackupCard {
   source_ref?: string | null;
 }
 
-interface BackupReview {
+export interface BackupReview {
   word: string;
   reviewed_at: string;
   rating: number;
@@ -33,7 +33,7 @@ interface BackupReview {
   duration_ms: number | null;
 }
 
-interface Backup {
+export interface Backup {
   app: "immerso";
   version: number;
   exported_at: string;
@@ -41,7 +41,8 @@ interface Backup {
   reviews: BackupReview[];
 }
 
-export async function exportData(): Promise<string> {
+/** 收集本机全部数据为备份结构 */
+export async function collectBackup(): Promise<Backup> {
   const db = await getApp();
   const cards = await db.select<BackupCard[]>(
     `SELECT c.word, c.deck, c.state, c.stability, c.difficulty, c.due, c.last_review,
@@ -53,50 +54,35 @@ export async function exportData(): Promise<string> {
     `SELECT c.word, r.reviewed_at, r.rating, r.state, r.stability, r.difficulty, r.due, r.duration_ms
      FROM reviews r JOIN cards c ON c.id = r.card_id`,
   );
-  const backup: Backup = {
+  return {
     app: "immerso",
     version: 1,
     exported_at: new Date().toISOString(),
     cards,
     reviews,
   };
-
-  const d = new Date();
-  const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
-  const path = await save({
-    defaultPath: `immerso-backup-${stamp}.json`,
-    filters: [{ name: "浸词备份", extensions: ["json"] }],
-  });
-  if (!path) return "已取消导出";
-  await writeTextFile(path, JSON.stringify(backup, null, 1));
-  return `✓ 已导出 ${cards.length} 张卡 · ${reviews.length} 条复习记录`;
 }
 
-export async function importData(): Promise<string> {
-  const path = await open({
-    multiple: false,
-    directory: false,
-    filters: [{ name: "浸词备份", extensions: ["json"] }],
-  });
-  if (!path) return "已取消导入";
-  const raw = await readTextFile(path as string);
-  let data: Backup;
-  try {
-    data = JSON.parse(raw);
-  } catch {
-    return "✗ 文件不是有效的 JSON";
-  }
-  if (data.app !== "immerso" || !Array.isArray(data.cards)) return "✗ 不是浸词的备份文件";
+/** 把远端备份合并进本库，返回人类可读的合并报告 */
+export async function mergeIntoLocal(data: Backup): Promise<string> {
+  if (data.app !== "immerso" || !Array.isArray(data.cards)) throw new Error("不是浸词的备份文件");
 
   const db = await getApp();
-  // 已有复习记录指纹
+  // 复习记录指纹（词,时间,评分）
   const reviewKeys = new Set(
     (
-      await db.select<
-        { w: string; t: string; r: number }[]
-      >("SELECT c.word AS w, r.reviewed_at AS t, r.rating AS r FROM reviews r JOIN cards c ON c.id = r.card_id")
+      await db.select<{ w: string; t: string; r: number }[]>(
+        "SELECT c.word AS w, r.reviewed_at AS t, r.rating AS r FROM reviews r JOIN cards c ON c.id = r.card_id",
+      )
     ).map((x) => `${x.w.toLowerCase()}|${x.t}|${x.r}`),
   );
+  // 远端记录按词分组，避免 O(n²)
+  const reviewsByWord = new Map<string, BackupReview[]>();
+  for (const r of data.reviews ?? []) {
+    const k = r.word.toLowerCase();
+    if (!reviewsByWord.has(k)) reviewsByWord.set(k, []);
+    reviewsByWord.get(k)!.push(r);
+  }
   // 已有原句指纹
   const sourceKeys = new Map<string, number>(
     (
@@ -127,8 +113,8 @@ export async function importData(): Promise<string> {
   for (const c of data.cards) {
     const key = c.word.toLowerCase();
     const existing = await db.select<
-      { id: number; last_review: string | null; due: string | null }[]
-    >("SELECT id, last_review, due FROM cards WHERE word = ? COLLATE NOCASE", [c.word]);
+      { id: number; last_review: string | null }[]
+    >("SELECT id, last_review FROM cards WHERE word = ? COLLATE NOCASE", [c.word]);
 
     if (existing.length === 0) {
       const sourceId = await ensureSource(c);
@@ -158,9 +144,8 @@ export async function importData(): Promise<string> {
       }
     }
 
-    // 补插这台设备上缺失的复习记录（只针对本卡当前归属的记录集）
-    for (const r of data.reviews) {
-      if (r.word.toLowerCase() !== key) continue;
+    // 补插本机缺失的复习记录
+    for (const r of reviewsByWord.get(key) ?? []) {
       const rk = `${key}|${r.reviewed_at}|${r.rating}`;
       if (reviewKeys.has(rk)) continue;
       reviewKeys.add(rk);
@@ -179,5 +164,41 @@ export async function importData(): Promise<string> {
 
   const parts = [`新增 ${addedCards} 卡`, `更新 ${updatedCards} 卡`, `补记 ${addedReviews} 条`];
   if (keptCards > 0) parts.push(`本机较新保留 ${keptCards} 卡`);
-  return `✓ 合并完成：${parts.join(" · ")}`;
+  return parts.join(" · ");
+}
+
+// ---------- 文件导入/导出（手动兜底） ----------
+
+export async function exportData(): Promise<string> {
+  const backup = await collectBackup();
+  const d = new Date();
+  const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+  const path = await save({
+    defaultPath: `immerso-backup-${stamp}.json`,
+    filters: [{ name: "浸词备份", extensions: ["json"] }],
+  });
+  if (!path) return "已取消导出";
+  await writeTextFile(path, JSON.stringify(backup));
+  return `✓ 已导出 ${backup.cards.length} 张卡 · ${backup.reviews.length} 条复习记录`;
+}
+
+export async function importData(): Promise<string> {
+  const path = await open({
+    multiple: false,
+    directory: false,
+    filters: [{ name: "浸词备份", extensions: ["json"] }],
+  });
+  if (!path) return "已取消导入";
+  const raw = await readTextFile(path as string);
+  let data: Backup;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    return "✗ 文件不是有效的 JSON";
+  }
+  try {
+    return `✓ 合并完成：${await mergeIntoLocal(data)}`;
+  } catch (e) {
+    return `✗ ${String(e)}`;
+  }
 }

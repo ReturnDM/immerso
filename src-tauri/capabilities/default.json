@@ -23,7 +23,11 @@
     },
     {
       "identifier": "http:default",
-      "allow": [{ "url": "https://neath.clingword.com/*" }]
+      "allow": [
+        { "url": "https://neath.clingword.com/*" },
+        { "url": "https://api.github.com/*" },
+        { "url": "https://gist.githubusercontent.com/*" }
+      ]
     }
   ]
 }

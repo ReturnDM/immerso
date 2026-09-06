@@ -41,6 +41,8 @@ node scripts/seed-cards.mjs 30   # 可选：灌 30 个 CET4 高频词试玩
 | Windows 10/11 x64 | `immerso_x.y.z_x64-setup.exe`（NSIS） | 双击安装 |
 | macOS 12+（Apple Silicon / Intel 通用） | `immerso_x.y.z_aarch64.dmg` | 未签名：首次打开右键 → 打开，或 `xattr -cr "/Applications/浸词.app"` |
 
+数据同步：**云同步**（设置页贴入 GitHub Token，数据自动同步到你的私有 Gist；两台设备配同一 Token 即可）或导出/导入数据包手动搬运。
+
 两个安装包由 GitHub Actions 在推送 `v*` 标签时自动构建，统一发布到 [Releases](https://github.com/ReturnDM/immerso/releases)。一套代码双端构建（Tauri），无平台分支代码；macOS 窗口使用系统红绿灯，Windows 使用自绘控制键。
 
 Mac 本地开发需 Xcode Command Line Tools 与 `rustup target add aarch64-apple-darwin x86_64-apple-darwin`。
