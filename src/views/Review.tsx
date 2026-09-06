@@ -41,6 +41,75 @@ const norm = (s: string) => s.trim().toLowerCase();
 const shuffle = <T,>(a: T[]): T[] =>
   a.map((v) => [Math.random(), v] as const).sort((x, y) => x[0] - y[0]).map(([, v]) => v);
 
+/** 原句挖空：把目标词（不分大小写、词边界）替换为下划线；找不到返回 false（句子照显，直接默写） */
+function blankWord(sentence: string, word: string): { text: string; found: boolean } {
+  const esc = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`\\b${esc}\\b`, "i");
+  return { text: sentence.replace(re, "_____"), found: re.test(sentence) };
+}
+
+/** 组词成句：点击乱序 token 拼回原句，全部放对自动判对 */
+function Scramble({
+  sentence,
+  onResult,
+}: {
+  sentence: string;
+  onResult: (ok: boolean) => void;
+}) {
+  const tokens = useMemo(() => {
+    const t = sentence.trim().split(/\s+/).map((w, i) => ({ w, i }));
+    let s = shuffle(t);
+    // 洗完恰好等于原句（单词少的句子概率不低）就轮换一位
+    if (s.every((x, i) => x.i === i) && s.length > 1) s = [...s.slice(1), s[0]];
+    return s;
+  }, [sentence]);
+  const [placed, setPlaced] = useState<number[]>([]);
+  const done = placed.length === tokens.length;
+
+  useEffect(() => {
+    if (done) onResult(tokens.every((_, i) => tokens[placed[i]]?.i === i));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [done]);
+
+  return (
+    <div className="w-full">
+      {/* 已拼区 */}
+      <div className="min-h-14 flex flex-wrap gap-2 items-center justify-center border-b border-[var(--border)] pb-4 mb-5">
+        {placed.length === 0 && <span className="text-xs t4">按语序点击下方单词</span>}
+        {placed.map((ti, pos) => (
+          <button
+            key={`${ti}-${pos}`}
+            onClick={() => setPlaced((p) => p.filter((_, k) => k !== pos))}
+            className="word-serif text-base t1 border border-[var(--border)] rounded-md px-2.5 py-1
+                       hover:border-[var(--t3)] transition-colors"
+          >
+            {tokens[ti].w}
+          </button>
+        ))}
+      </div>
+      {/* 待选池 */}
+      <div className="flex flex-wrap gap-2 justify-center">
+        {tokens.map((t, i) =>
+          placed.includes(i) ? (
+            <span key={i} className="word-serif text-base border border-transparent rounded-md px-2.5 py-1 opacity-25">
+              {t.w}
+            </span>
+          ) : (
+            <button
+              key={i}
+              onClick={() => setPlaced((p) => [...p, i])}
+              className="word-serif text-base t2 border border-[var(--border)] rounded-md px-2.5 py-1
+                         hover:border-[var(--accent)] hover:text-[var(--text)] active:scale-95 transition-all"
+            >
+              {t.w}
+            </button>
+          ),
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** 复习完成屏底部：后台云同步（未配置则不渲染） */
 function DoneSync() {
   const [msg, setMsg] = useState<string | null>(null);
@@ -88,7 +157,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
   const item = queue?.[idx];
   const mode: ExMode = useMemo(() => {
     if (!item || !modes) return "self";
-    return pickMode(modes, item.isNew, item.card.reps);
+    return pickMode(modes, item.isNew, item.card.reps, !!item.sourceContext);
   }, [item, modes]);
 
   // 四选一的干扰项从同队列其他卡生成；不够四个就回落自评
@@ -112,7 +181,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
   const effMode: ExMode = choice === null && (mode === "choice_en" || mode === "choice_zh")
     ? "self"
     : mode;
-  const typing = effMode === "dictation" || effMode === "listen";
+  const typing = effMode === "dictation" || effMode === "listen" || effMode === "cloze";
 
   // 听音拼写：出题即朗读
   useEffect(() => {
@@ -197,6 +266,26 @@ export default function Review({ onExit }: { onExit: () => void }) {
     [choice, phase, item],
   );
 
+  /** 组词成句拼完：全部归位自动良好，否则揭示原句手动评分 */
+  const answerScramble = useCallback(
+    (ok: boolean) => {
+      if (!item || phase !== "ask") return;
+      const { options: iv, scheduling } = previewOptions(item.card);
+      schedulingRef.current = scheduling;
+      setIntervals(iv);
+      setRevealed(true);
+      if (autoSpeak.current) speak(item.word);
+      if (ok) {
+        setPhase("right");
+        autoGrade.current = Rating.Good;
+      } else {
+        setPhase("wrong");
+        autoGrade.current = null;
+      }
+    },
+    [item, phase],
+  );
+
   // 键盘
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -235,6 +324,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
         }
         return;
       }
+      if (effMode === "scramble" && !revealed) return; // 拼句纯点击，不接空格翻面
       if (e.key === " " && !revealed) {
         e.preventDefault();
         flip();
@@ -318,14 +408,25 @@ export default function Review({ onExit }: { onExit: () => void }) {
           ) : typing ? (
             <div key={item!.id} className="text-center w-full max-w-xl animate-card-in">
               <p className="text-xs t4 tracking-[0.3em]">
-                {effMode === "listen" ? "听 写" : "默 写"}
+                {effMode === "listen" ? "听 写" : effMode === "cloze" ? "填 空" : "默 写"}
               </p>
-              {effMode === "dictation" && (
+              {effMode === "cloze" ? (
+                <>
+                  <p className="mt-7 text-lg t1 leading-relaxed text-left">
+                    {blankWord(item!.sourceContext ?? "", item!.word).text}
+                  </p>
+                  {!blankWord(item!.sourceContext ?? "", item!.word).found && (
+                    <p className="mt-2 text-[11px] t4 text-left">
+                      原句里没有该词原形，按释义直接默写
+                    </p>
+                  )}
+                  <p className="mt-3 text-sm t3">{firstLine(item!.dict?.translation)}</p>
+                </>
+              ) : effMode === "dictation" ? (
                 <div className="mt-6 text-lg t1 leading-relaxed">
                   <Translation text={item!.dict?.translation ?? "（词典缺释义）"} />
                 </div>
-              )}
-              {effMode === "listen" && (
+              ) : (
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -352,7 +453,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
                     submitTyping();
                   }
                 }}
-                placeholder="输入英文后回车"
+                placeholder={effMode === "cloze" ? "填入空格里的单词" : "输入英文后回车"}
                 spellCheck={false}
                 autoComplete="off"
                 className="word-serif field mt-9 w-80 px-2 py-2.5 text-2xl text-center t1"
@@ -360,6 +461,12 @@ export default function Review({ onExit }: { onExit: () => void }) {
               <p className="mt-5 text-xs t4">
                 {effMode === "listen" ? "回车提交 · 可点喇叭重听" : "回车提交"}
               </p>
+            </div>
+          ) : effMode === "scramble" ? (
+            <div key={item!.id} className="w-full max-w-xl animate-card-in">
+              <p className="text-center text-xs t4 tracking-[0.3em] mb-7">组 词 成 句</p>
+              <p className="text-center text-sm t3 mb-6">{firstLine(item!.dict?.translation)}</p>
+              <Scramble sentence={item!.sourceContext ?? ""} onResult={answerScramble} />
             </div>
           ) : (
             <div key={item!.id} className="text-center w-full max-w-lg animate-card-in">

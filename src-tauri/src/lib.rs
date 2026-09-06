@@ -192,16 +192,6 @@ async fn capture_selected(app: tauri::AppHandle) -> Result<String, String> {
     .map_err(|e| e.to_string())?
 }
 
-/// 打包内置的词典路径；开发机没跑 prepare-dict-resource.mjs 时返回 None（前端回退老路径）
-#[tauri::command]
-fn bundled_dict_path(app: tauri::AppHandle) -> Option<String> {
-    app.path()
-        .resolve("resources/dict.db", tauri::path::BaseDirectory::Resource)
-        .ok()
-        .filter(|p| p.exists())
-        .map(|p| p.to_string_lossy().into_owned())
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -218,13 +208,28 @@ pub fn run() {
                 .add_migrations("sqlite:immerso.db", migrations())
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![
-            set_quick_hotkeys,
-            capture_selected,
-            bundled_dict_path
-        ])
+        .invoke_handler(tauri::generate_handler![set_quick_hotkeys, capture_selected])
         .setup(|app| {
-            // 默认：划词直加 Alt+Q、查词小窗 Ctrl+Shift+Space；前端起来后按设置页保存值重挂
+            // 内置词典释放：安装包带 resources/dict.db 时拷到数据目录（大小不同视为新版覆盖）。
+            // 不让插件直读资源绝对路径——sqlx 对 Windows 绝对路径连接串解析不可靠。
+            let res = app
+                .path()
+                .resolve("resources/dict.db", tauri::path::BaseDirectory::Resource);
+            if let Ok(res) = res {
+                if res.exists() {
+                    let target = app.path().app_config_dir().map(|p| p.join("dict.db"));
+                    if let Ok(target) = target {
+                        let stale = std::fs::metadata(&target).map(|m| m.len()).unwrap_or(0)
+                            != std::fs::metadata(&res).map(|m| m.len()).unwrap_or(1);
+                        if stale {
+                            if let Err(e) = std::fs::copy(&res, &target) {
+                                eprintln!("内置词典释放失败: {e}");
+                            }
+                        }
+                    }
+                }
+            }
+            // 默认：划词直加 Alt+Q、查词小窗 Alt+E；前端起来后按设置页保存值重挂
             if let Err(e) = register_hotkeys(app.handle(), Some("alt+q"), Some("alt+e")) {
                 eprintln!("注册默认热键失败: {e}");
             }
