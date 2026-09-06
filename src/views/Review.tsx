@@ -255,7 +255,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
   if (queue.length === 0) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-5">
-        <Icon name="check" size={36} className="accent-text" strokeWidth={1.4} />
+        <Icon name="check" size={36} className="accent-text animate-check-in" strokeWidth={1.4} />
         <p className="text-xl t1 word-serif">今日完成</p>
         {answered > 0 && <p className="t3 text-[13px] num">本轮 {answered} 张</p>}
         <button onClick={onExit} className="mt-3 link text-sm hairline pt-1">
@@ -475,7 +475,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
                 <button
                   key={g}
                   onClick={() => void grade(g)}
-                  className="rounded-md px-2 py-3 transition-colors hover:bg-[var(--hover)]"
+                  className="rounded-md px-2 py-3 transition-colors hover:bg-[var(--hover)] active:scale-[0.97]"
                 >
                   <span className="flex items-baseline justify-center gap-2">
                     <span className="num text-xs t4">{i + 1}</span>

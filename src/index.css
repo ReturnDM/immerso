@@ -27,6 +27,36 @@
   .animate-fade-in {
     animation: fade-in 0.5s ease-out;
   }
+  /* 视图切换：整页淡入上浮 */
+  .animate-view-in {
+    animation: view-in 0.32s cubic-bezier(0.2, 0.7, 0.3, 1);
+  }
+  /* 勾选/成功标记：弹入 */
+  .animate-check-in {
+    animation: check-in 0.18s ease-out;
+  }
+}
+
+@keyframes view-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes check-in {
+  from {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 :root {
@@ -97,13 +127,16 @@ body {
 }
 
 @layer components {
-  /* 输入：一条底部发丝线，无框无底 */
+  /* 输入：一条底部发丝线，无框无底；悬停时线加深 */
   .field {
     background: transparent;
     border: none;
     border-bottom: 1px solid var(--border);
     border-radius: 0;
     transition: border-color 0.15s;
+  }
+  .field:hover {
+    border-bottom-color: var(--t3);
   }
   .field:focus {
     outline: none;
@@ -134,14 +167,17 @@ body {
     color: var(--text);
   }
 
-  /* 实心墨按钮：全站最重的元素 */
+  /* 实心墨按钮：全站最重的元素；按压轻微回缩 */
   .btn-ink {
     background: var(--ink);
     color: var(--ink-text);
-    transition: opacity 0.15s;
+    transition: opacity 0.15s, transform 0.1s;
   }
   .btn-ink:hover {
     opacity: 0.86;
+  }
+  .btn-ink:active {
+    transform: scale(0.98);
   }
 
   /* 文字行列表：行间发丝线 */

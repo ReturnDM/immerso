@@ -75,7 +75,7 @@ function Segmented<T extends string>({
           className={`pb-0.5 border-b transition-colors ${
             value === o.v
               ? "border-[var(--accent)] accent-text"
-              : "border-transparent t3 hover:text-[var(--text)]"
+              : "border-transparent t3 hover:text-[var(--text)] hover:border-[var(--t4)]"
           }`}
         >
           {o.label}
@@ -106,7 +106,11 @@ function Check({
           on ? "border-[var(--accent)] accent-text" : "border-[var(--border)] group-hover:border-[var(--t3)]"
         }`}
       >
-        {on && <Icon name="check" size={10} strokeWidth={2.5} />}
+        {on && (
+          <span className="animate-check-in inline-flex">
+            <Icon name="check" size={10} strokeWidth={2.5} />
+          </span>
+        )}
       </span>
       <span>
         <span className={`text-sm ${on ? "t1" : "t2"}`}>{label}</span>
@@ -122,7 +126,7 @@ function Switch({ on, onToggle, title }: { on: boolean; onToggle: () => void; ti
       onClick={onToggle}
       title={title}
       className={`relative w-9 h-5 rounded-full transition-colors ${
-        on ? "bg-[var(--ink)]" : "border border-[var(--border)]"
+        on ? "bg-[var(--ink)]" : "border border-[var(--border)] hover:border-[var(--t3)]"
       }`}
     >
       <span

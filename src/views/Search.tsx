@@ -106,7 +106,8 @@ export default function Search({ onBack }: { onBack: () => void }) {
           return (
             <div key={e.word} className="py-4 border-t border-[var(--border)]">
               <div
-                className="flex items-baseline gap-3 cursor-pointer"
+                className="flex items-baseline gap-3 cursor-pointer -mx-3 px-3 py-1.5 rounded-md
+                           hover:bg-[var(--hover)] transition-colors"
                 onClick={() => setOpen(isOpen ? null : e.word)}
               >
                 <span className="word-serif text-lg t1">{e.word}</span>

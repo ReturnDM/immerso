@@ -93,7 +93,7 @@ export default function Library({ onBack }: { onBack: () => void }) {
     `pb-1.5 -mb-px border-b-2 transition-colors ${
       active
         ? "border-[var(--accent)] accent-text"
-        : "border-transparent t3 hover:text-[var(--text)]"
+        : "border-transparent t3 hover:text-[var(--text)] hover:border-[var(--t4)]"
     }`;
 
   return (

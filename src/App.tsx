@@ -49,20 +49,22 @@ export default function App() {
   return (
     <>
       <TitleBar />
-      {view === "search" && <Search onBack={() => setView("home")} />}
-      {view === "review" && <Review onExit={() => setView("home")} />}
-      {view === "settings" && <Settings onBack={() => setView("home")} />}
-      {view === "stats" && <Stats onBack={() => setView("home")} />}
-      {view === "library" && <Library onBack={() => setView("home")} />}
-      {view === "home" && (
-        <Home
-          onStart={() => setView("review")}
-          onSearch={() => setView("search")}
-          onSettings={() => setView("settings")}
-          onStats={() => setView("stats")}
-          onLibrary={() => setView("library")}
-        />
-      )}
+      <div key={view} className="animate-view-in">
+        {view === "search" && <Search onBack={() => setView("home")} />}
+        {view === "review" && <Review onExit={() => setView("home")} />}
+        {view === "settings" && <Settings onBack={() => setView("home")} />}
+        {view === "stats" && <Stats onBack={() => setView("home")} />}
+        {view === "library" && <Library onBack={() => setView("home")} />}
+        {view === "home" && (
+          <Home
+            onStart={() => setView("review")}
+            onSearch={() => setView("search")}
+            onSettings={() => setView("settings")}
+            onStats={() => setView("stats")}
+            onLibrary={() => setView("library")}
+          />
+        )}
+      </div>
     </>
   );
 }
