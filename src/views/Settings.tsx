@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   getDailyNew,
@@ -87,16 +88,30 @@ export default function Settings({ onBack }: { onBack: () => void }) {
   const [cloudBusy, setCloudBusy] = useState(false);
   const [cloudMsg, setCloudMsg] = useState<string | null>(null);
   const [lastCloud, setLastCloud] = useState<string | null>(null);
+  const [hotkey, setHotkey] = useState("alt+q");
+  const [hotkeyMsg, setHotkeyMsg] = useState<string | null>(null);
 
   useEffect(() => {
     getDailyNew().then((v) => setQuota(String(v)));
     getEnabledModes().then(setModes);
     getSetting("auto_pronounce").then((v) => setAutoSpeak(v !== "off"));
     getSetting("auto_cloud_sync").then((v) => setAutoCloud(v !== "off"));
+    getSetting("quick_hotkey").then((v) => setHotkey(v ?? "alt+q"));
     lastSyncText().then(setLastSync);
     lastCloudSyncText().then(setLastCloud);
     getGhToken().then(setGhToken);
   }, []);
+
+  const changeHotkey = async (v: string) => {
+    setHotkey(v);
+    setHotkeyMsg(null);
+    await setSetting("quick_hotkey", v);
+    try {
+      await invoke("set_quick_hotkey", { accelerator: v || null });
+    } catch {
+      setHotkeyMsg("✗ 注册失败，热键可能被其他程序占用");
+    }
+  };
 
   const toggleMode = (id: ExMode) => {
     if (!modes) return;
@@ -224,6 +239,29 @@ export default function Settings({ onBack }: { onBack: () => void }) {
               }`}
             />
           </button>
+        </div>
+
+        {/* 快速收词热键 */}
+        <div className="surface rounded-xl px-5 py-4">
+          <div className="flex items-center">
+            <div>
+              <p className="t1 text-sm">快速收词热键</p>
+              <p className="mt-1 text-xs t3">任意应用里复制单词后按热键，小窗回车收进词书</p>
+            </div>
+            <div className="ml-auto flex-none">
+              <Segmented
+                value={hotkey}
+                options={[
+                  { v: "alt+q", label: "Alt+Q" },
+                  { v: "alt+e", label: "Alt+E" },
+                  { v: "ctrl+shift+space", label: "Ctrl+⇧空格" },
+                  { v: "", label: "关闭" },
+                ]}
+                onChange={(v) => void changeHotkey(v)}
+              />
+            </div>
+          </div>
+          {hotkeyMsg && <p className="mt-2 text-xs text-rose-400">{hotkeyMsg}</p>}
         </div>
 
         {/* 云同步 */}

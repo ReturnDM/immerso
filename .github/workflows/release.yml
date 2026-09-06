@@ -37,6 +37,12 @@ jobs:
       - name: 安装前端依赖
         run: npm ci
 
+      - name: 从 CHANGELOG 提取版本说明
+        id: notes
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: node scripts/release-notes.mjs
+
       - name: 构建并发布
         uses: tauri-apps/tauri-action@v0
         env:
@@ -44,7 +50,7 @@ jobs:
         with:
           tagName: v__VERSION__
           releaseName: 浸词 v__VERSION__
-          releaseBody: 浸词 immerso 桌面背单词。Windows 下载 -setup.exe 安装；macOS 下载 .dmg（通用二进制，未签名，首启右键打开或执行 xattr -cr "/Applications/浸词.app"）。
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}

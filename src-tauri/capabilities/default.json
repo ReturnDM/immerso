@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
-  "windows": ["main"],
+  "description": "Capability for the main window and the quick-capture window",
+  "windows": ["main", "quick"],
   "permissions": [
     "core:default",
     "opener:default",
@@ -12,6 +12,8 @@
     "core:window:allow-toggle-maximize",
     "core:window:allow-close",
     "core:window:allow-start-dragging",
+    "core:window:allow-hide",
+    "clipboard-manager:allow-read-text",
     "dialog:default",
     {
       "identifier": "fs:allow-read-text-file",

@@ -79,6 +79,11 @@ body {
   color: var(--text);
 }
 
+/* 快速收词小窗：透明窗体上铺圆角卡片 */
+.quick-transparent {
+  background: transparent !important;
+}
+
 /* 单词展示：字典衬线 */
 .word-serif {
   font-family: Georgia, "Times New Roman", "Palatino", "Songti SC", "Noto Serif SC", "Source Han Serif SC", serif;

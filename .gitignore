@@ -24,3 +24,4 @@ dist-ssr
 *.sw?
 .cache/
 *.db
+release_body.md
