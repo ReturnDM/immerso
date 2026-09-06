@@ -7,6 +7,8 @@ import {
   type TodayStats,
 } from "../lib/db";
 import { maybeAutoSync } from "../lib/cloud";
+import { useCountUp } from "../lib/useCountUp";
+import DeckPicker from "../components/DeckPicker";
 
 interface Props {
   onStart: () => void;
@@ -19,7 +21,7 @@ interface Props {
 export default function Home({ onStart, onSearch, onSettings, onStats, onLibrary }: Props) {
   const [stats, setStats] = useState<TodayStats | null>(null);
   const [deck, setDeck] = useState("全部");
-  const [decks, setDecks] = useState<string[]>(["全部"]);
+  const [deckList, setDeckList] = useState<{ name: string; total?: number }[]>([]);
   const [cloudStatus, setCloudStatus] = useState<string | null>(null);
 
   useEffect(() => {
@@ -27,8 +29,9 @@ export default function Home({ onStart, onSearch, onSettings, onStats, onLibrary
       try {
         const d = await getCurrentDeck();
         setDeck(d);
-        setDecks(["全部", ...(await getDecks()).map((x) => x.name)]);
-        setStats(await getTodayStats(d));
+        const s = await getTodayStats(d);
+        setStats(s);
+        setDeckList(await getDecks());
       } catch (e) {
         console.error(e);
         setStats({ reviewCount: 0, newCount: 0, total: 0, doneToday: 0, library: 0 });
@@ -61,6 +64,8 @@ export default function Home({ onStart, onSearch, onSettings, onStats, onLibrary
   const total = stats?.total ?? 0;
   const done = stats?.doneToday ?? 0;
   const p = done + total > 0 ? done / (done + total) : 0;
+  const shownTotal = useCountUp(total);
+  const pickerOptions = [{ name: "全部", total: stats?.library }, ...deckList];
 
   return (
     <div className="min-h-screen flex flex-col items-center px-8 py-9">
@@ -76,7 +81,7 @@ export default function Home({ onStart, onSearch, onSettings, onStats, onLibrary
       <div className="flex-1 flex flex-col items-center justify-center text-center w-full">
         {total > 0 ? (
           <>
-            <div className="num text-7xl font-light t1">{total}</div>
+            <div className="num text-7xl font-light t1 tabular-nums">{shownTotal}</div>
             <p className="mt-4 text-[13px] t2 tracking-wide">
               复习 {stats!.reviewCount} · 新词 {stats!.newCount}
               {deck !== "全部" && <span className="t4"> · {deck}</span>}
@@ -106,16 +111,7 @@ export default function Home({ onStart, onSearch, onSettings, onStats, onLibrary
       </div>
 
       <div className="w-full max-w-2xl self-center flex items-center text-xs t4 select-none">
-        <select
-          value={deck}
-          onChange={(e) => void pickDeck(e.target.value)}
-          className="field px-1 py-1 text-xs t2 cursor-pointer"
-          title="学习词库"
-        >
-          {decks.map((d) => (
-            <option key={d} value={d}>{d}</option>
-          ))}
-        </select>
+        <DeckPicker options={pickerOptions} value={deck} onChange={(d) => void pickDeck(d)} />
         {stats && <span className="num ml-3">{stats.library} 张卡</span>}
         {cloudStatus && <span className="ml-3 truncate max-w-[280px]">{cloudStatus}</span>}
         <span className="ml-auto">ECDICT · FSRS-5</span>

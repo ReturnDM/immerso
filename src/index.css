@@ -40,7 +40,7 @@
 @keyframes view-in {
   from {
     opacity: 0;
-    transform: translateY(10px);
+    transform: translateY(6px);
   }
   to {
     opacity: 1;
@@ -61,6 +61,29 @@
 
 :root {
   font-family: -apple-system, "SF Pro Text", "PingFang SC", "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+}
+
+/* 滚动条：常驻占位（防止视图切换时出现/消失导致内容横移）+ 细样式 */
+html {
+  scrollbar-gutter: stable;
+}
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--t4);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--t3);
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 
 /* 「砚」：单色纸墨。深色 = 淡墨（绿相，非纯黑），浅色 = 宣纸；

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getApp, getTodayStats, type TodayStats } from "../lib/db";
+import { useCountUp } from "../lib/useCountUp";
 import { Icon } from "../components/Icon";
 
 interface DayCount {
@@ -81,7 +82,7 @@ function Ring({ p, done, total }: { p: number; done: number; total: number }) {
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="num text-3xl font-light t1">{done}</span>
+        <span className="num text-3xl font-light t1 tabular-nums">{done}</span>
         <span className="text-xs t3">/ {total} 次</span>
       </div>
     </div>
@@ -109,6 +110,9 @@ export default function Stats({ onBack }: { onBack: () => void }) {
   const streak = streakOf(days);
   const grid = heatGrid(days);
   const library = stats?.library ?? 0;
+  const shownDone = useCountUp(done);
+  const shownStreak = useCountUp(streak);
+  const shownReviews = useCountUp(totalReviews);
 
   return (
     <div className="min-h-screen flex flex-col items-center px-6 pt-12 pb-10">
@@ -123,7 +127,7 @@ export default function Stats({ onBack }: { onBack: () => void }) {
       <div className="mt-10 w-full max-w-xl flex flex-col gap-10">
         {/* 今日进度环 */}
         <div className="flex items-center gap-9">
-          <Ring p={p} done={done} total={done + remaining} />
+          <Ring p={p} done={shownDone} total={done + remaining} />
           <div className="text-sm t2 space-y-2.5">
             <p>今日进度 {Math.round(p * 100)}%</p>
             <p className="t3 text-[13px]">
@@ -135,13 +139,13 @@ export default function Stats({ onBack }: { onBack: () => void }) {
         {/* 连续与累计 */}
         <div className="grid grid-cols-2 divide-x divide-[var(--border)]">
           <div className="text-center">
-            <p className="num text-3xl font-light t1">{streak}</p>
+            <p className="num text-3xl font-light t1 tabular-nums">{shownStreak}</p>
             <p className="mt-2 text-xs t3 inline-flex items-center gap-1.5">
               <Icon name="flame" size={12} className="accent-text" /> 连续天数
             </p>
           </div>
           <div className="text-center">
-            <p className="num text-3xl font-light t1">{totalReviews}</p>
+            <p className="num text-3xl font-light t1 tabular-nums">{shownReviews}</p>
             <p className="mt-2 text-xs t3">累计复习次数</p>
           </div>
         </div>
