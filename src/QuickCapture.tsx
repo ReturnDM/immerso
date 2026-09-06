@@ -1,40 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import {
-  addCard,
-  addWordToDeck,
-  getAllDeckNames,
-  getSetting,
-  getWordDecks,
-  lookup,
-  setSetting,
-  type DictEntry,
-} from "./lib/db";
+import { addCard, addWordToDeck, getAllDeckNames, getSetting, setSetting } from "./lib/db";
+import { cleanWord, resolveWord, type Resolved } from "./lib/capture";
 import { speak } from "./lib/fsrs";
 
 const quickWin = getCurrentWebviewWindow();
 
-/** 剪贴板原文 → 可入库的词：去引号括号、取首行、限长 */
-function cleanWord(raw: string): string {
-  let w = raw.replace(/\r?\n/g, " ").replace(/\s+/g, " ").trim();
-  w = w.replace(/^["'“”‘’「」『』《》\[\(\{]+/, "").replace(/["'“”‘’「」『』《》\]\)\}\.,;:!?\.\!\?]+$/, "").trim();
-  if (w.length > 48) w = w.slice(0, 48).trim();
-  return w;
-}
-
 export default function QuickCapture() {
   const [word, setWord] = useState("");
-  const [entry, setEntry] = useState<DictEntry | null>(null);
+  const [resolved, setResolved] = useState<Resolved | null>(null);
   const [decks, setDecks] = useState<string[]>([]);
   const [deck, setDeck] = useState("生词本");
-  const [inDecks, setInDecks] = useState<string[]>([]);
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const lastPrep = useRef(0);
 
-  /** 每次呼出：读剪贴板带词、查释义、选默认词书 */
+  /** 每次呼出：读剪贴板带词、选默认词书（词条解析走下方输入防抖，统一一条路） */
   const prepare = useCallback(async () => {
     // quick-show 事件与焦点事件会接连触发，去重
     if (Date.now() - lastPrep.current < 200) return;
@@ -48,15 +31,7 @@ export default function QuickCapture() {
       /* 剪贴板可能是图片等非文本 */
     }
     setWord(w);
-    setEntry(null);
-    setInDecks([]);
-    if (w) {
-      const rows = await lookup(w);
-      const exact = rows[0]?.word.toLowerCase() === w.toLowerCase() ? rows[0] : null;
-      setEntry(exact);
-      const map = await getWordDecks([w]);
-      setInDecks(map.get(w.toLowerCase()) ?? []);
-    }
+    setResolved(null);
     const names = await getAllDeckNames();
     const list = names.length > 0 ? names : ["生词本"];
     setDecks(list);
@@ -70,6 +45,19 @@ export default function QuickCapture() {
     document.documentElement.classList.add("quick-transparent");
     document.body.classList.add("quick-transparent");
   }, []);
+
+  // 输入防抖 160ms 动态解析：精确释义 / 词形还原 / 已在词书
+  useEffect(() => {
+    const w = word.trim();
+    if (!w) {
+      setResolved(null);
+      return;
+    }
+    const t = setTimeout(() => {
+      void resolveWord(w).then(setResolved);
+    }, 160);
+    return () => clearTimeout(t);
+  }, [word]);
 
   // 挂载即准备一次（惰性创建的首次打开），此后每次呼出靠 quick-show / 焦点事件刷新；失去焦点自动收起
   useEffect(() => {
@@ -87,18 +75,19 @@ export default function QuickCapture() {
   }, []);
 
   const add = async () => {
-    const w = word.trim();
-    if (!w || busy) return;
+    const r = resolved;
+    if (!r?.word || busy) return;
     setBusy(true);
     try {
-      if (inDecks.includes(deck)) {
+      if (r.inDecks.includes(deck)) {
         setStatus({ ok: false, text: `已在「${deck}」` });
         return;
       }
-      if (inDecks.length === 0) await addCard(w, undefined, deck);
-      else await addWordToDeck(w, deck);
+      if (r.inDecks.length === 0) await addCard(r.cardWord, undefined, deck);
+      else await addWordToDeck(r.cardWord, deck);
       void setSetting("quick_deck", deck);
-      setStatus({ ok: true, text: `✓ 已收进「${deck}」` });
+      const via = r.viaLemma ? `（${r.viaLemma} → ${r.cardWord}）` : "";
+      setStatus({ ok: true, text: `✓ ${r.cardWord}${via} 已收进「${deck}」` });
       setTimeout(() => void quickWin.hide(), 900);
     } catch (e) {
       setStatus({ ok: false, text: String(e) });
@@ -107,8 +96,11 @@ export default function QuickCapture() {
     }
   };
 
+  const entry = resolved?.entry ?? null;
+  const hasWord = word.trim().length > 0;
+
   return (
-    <div className="absolute inset-3 rounded-2xl surface shadow-[0_18px_50px_rgba(0,0,0,0.5)] flex flex-col px-5 py-4 overflow-hidden animate-fade-in">
+    <div className="absolute inset-0 rounded-2xl surface shadow-none flex flex-col px-5 py-4 overflow-hidden animate-fade-in">
       <div className="flex items-baseline">
         <span className="text-xs tracking-[0.3em] t3 select-none" data-tauri-drag-region>
           快速收词
@@ -116,7 +108,7 @@ export default function QuickCapture() {
         <span className="ml-auto text-[11px] t4">Enter 收词 · Esc 收起</span>
       </div>
       <div className="waterline mt-2">
-        <i style={{ width: word.trim() ? "100%" : "0%" }} />
+        <i style={{ width: hasWord ? "100%" : "0%" }} />
       </div>
 
       <input
@@ -135,16 +127,21 @@ export default function QuickCapture() {
       <div className="mt-1 min-h-[34px]">
         {entry ? (
           <p className="text-xs t2 leading-5 line-clamp-2">
-            {entry.phonetic && <span className="accent-text mr-2">{entry.phonetic}</span>}
+            {entry.phonetic && entry.phonetic.toLowerCase() !== entry.word.toLowerCase() && (
+              <span className="accent-text mr-2">{entry.phonetic}</span>
+            )}
             {entry.translation.split(/\n/)[0]}
           </p>
-        ) : word.trim() ? (
+        ) : hasWord ? (
           <p className="text-xs t4">未收录，仍可收进词书</p>
         ) : (
-          <p className="text-xs t4">在别的应用里复制单词，再按热键</p>
+          <p className="text-xs t4">在别的应用里选中单词，或直接输入</p>
         )}
-        {inDecks.length > 0 && (
-          <p className="text-[11px] t4 mt-0.5">已在：{inDecks.join(" · ")}</p>
+        {resolved?.viaLemma && (
+          <p className="text-[11px] accent-text mt-0.5">词形 {resolved.viaLemma} → {resolved.cardWord}</p>
+        )}
+        {resolved && resolved.inDecks.length > 0 && (
+          <p className="text-[11px] t4 mt-0.5">已在：{resolved.inDecks.join(" · ")}</p>
         )}
       </div>
 

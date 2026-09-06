@@ -17,6 +17,7 @@ export interface DictEntry {
   translation: string;
   definition: string;
   pos: string;
+  exchange: string;
 }
 
 interface CardRow {
@@ -123,7 +124,7 @@ function deckClause(deck: string): { sql: string; params: string[] } {
 
 export async function lookup(q: string): Promise<DictEntry[]> {
   const db = await getDict();
-  const cols = "word, phonetic, translation, definition, pos";
+  const cols = "word, phonetic, translation, definition, pos, exchange";
   const exact = await db.select<DictEntry[]>(
     `SELECT ${cols} FROM dict WHERE word = ? COLLATE NOCASE LIMIT 1`,
     [q],
@@ -135,14 +136,23 @@ export async function lookup(q: string): Promise<DictEntry[]> {
   );
 }
 
-async function dictEntries(words: string[]): Promise<Map<string, DictEntry>> {
-  const map = new Map<string, DictEntry>();
+/** 词形还原：变形词 → 词基（lemma 表，未命中返回 null） */
+export async function lookupBase(word: string): Promise<string | null> {
+  const db = await getDict();
+  const rows = await db.select<{ base: string }[]>(
+    "SELECT base FROM lemma WHERE en = ? COLLATE NOCASE",
+    [word],
+  );
+  return rows[0]?.base ?? null;
+}
+
+async function dictEntries(words: string[]): Promise<Map<string, DictEntry>> {  const map = new Map<string, DictEntry>();
   if (words.length === 0) return map;
   const db = await getDict();
   for (let i = 0; i < words.length; i += 200) {
     const chunk = words.slice(i, i + 200);
     const rows = await db.select<DictEntry[]>(
-      `SELECT word, phonetic, translation, definition, pos FROM dict
+      `SELECT word, phonetic, translation, definition, pos, exchange FROM dict
        WHERE word COLLATE NOCASE IN (${chunk.map(() => "?").join(",")})`,
       chunk,
     );

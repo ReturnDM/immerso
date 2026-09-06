@@ -79,7 +79,7 @@ INSERT OR IGNORE INTO deck_words (word, deck) SELECT word, deck FROM cards;
     ]
 }
 
-/// 热键按下：呼出 / 收起快速收词小窗。
+/// 查词小窗热键：呼出 / 收起快速收词小窗。
 /// 小窗惰性创建——Windows 上透明窗体配 visible:false 会被 WebView2 无视（启动即显形），
 /// 所以不在配置里预建，首次按热键时再建，之后复用切换显隐。
 fn toggle_quick(app: &tauri::AppHandle) {
@@ -105,6 +105,7 @@ fn toggle_quick(app: &tauri::AppHandle) {
     .always_on_top(true)
     .skip_taskbar(true)
     .resizable(false)
+    .shadow(false)
     .center();
     // transparent() 在 macOS 需 macos-private-api 特性，不开；Mac 上小窗为不透明方角
     #[cfg(any(target_os = "windows", target_os = "linux"))]
@@ -117,16 +118,78 @@ fn toggle_quick(app: &tauri::AppHandle) {
     });
 }
 
-/// 设置页改热键后由前端调用：全部注销再注册新键；None/空串 = 关闭
-#[tauri::command]
-fn set_quick_hotkey(app: tauri::AppHandle, accelerator: Option<String>) -> Result<(), String> {
+/// 划词直加热键：让主窗口前端执行「读选中 → 直接入书 → 系统通知」
+fn direct_capture(app: &tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.emit("quick-direct", ());
+    }
+}
+
+/// 注册两个热键（None = 关闭该热键）；改键时先全部注销再重挂
+fn register_hotkeys(
+    app: &tauri::AppHandle,
+    direct: Option<&str>,
+    popup: Option<&str>,
+) -> Result<(), String> {
     let gs = app.global_shortcut();
     gs.unregister_all().map_err(|e| e.to_string())?;
-    let acc = accelerator.as_deref().map(str::trim).filter(|s| !s.is_empty());
-    if let Some(acc) = acc {
-        gs.register(acc).map_err(|e| e.to_string())?;
+    if let Some(acc) = popup {
+        gs.on_shortcut(acc, |app, _s, event| {
+            if event.state() == ShortcutState::Pressed {
+                toggle_quick(app);
+            }
+        })
+        .map_err(|e| e.to_string())?;
+    }
+    if let Some(acc) = direct {
+        gs.on_shortcut(acc, |app, _s, event| {
+            if event.state() == ShortcutState::Pressed {
+                direct_capture(app);
+            }
+        })
+        .map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+/// 设置页改热键后由前端调用：同时重挂两个热键；None/空串 = 关闭
+#[tauri::command]
+fn set_quick_hotkeys(
+    app: tauri::AppHandle,
+    direct: Option<String>,
+    popup: Option<String>,
+) -> Result<(), String> {
+    let d = direct.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let p = popup.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    register_hotkeys(&app, d, p)
+}
+
+/// 模拟 Ctrl+C（macOS 为 ⌘C）复制当前选中文本并读取；先记旧剪贴板，复制完还原，不破坏用户剪贴板
+#[tauri::command]
+async fn capture_selected(app: tauri::AppHandle) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use enigo::{Direction, Enigo, Key, Keyboard, Settings};
+        use tauri_plugin_clipboard_manager::ClipboardExt;
+        let old = app.clipboard().read_text().ok();
+        let mut enigo = Enigo::new(&Settings::default()).map_err(|e| e.to_string())?;
+        #[cfg(target_os = "macos")]
+        let (modifier, copy) = (Key::Meta, Key::Unicode('c'));
+        #[cfg(not(target_os = "macos"))]
+        let (modifier, copy) = (Key::Control, Key::Unicode('c'));
+        enigo.key(modifier, Direction::Press).map_err(|e| e.to_string())?;
+        enigo.key(copy, Direction::Click).map_err(|e| e.to_string())?;
+        enigo.key(modifier, Direction::Release).map_err(|e| e.to_string())?;
+        std::thread::sleep(std::time::Duration::from_millis(180));
+        let text = app.clipboard().read_text().map_err(|e| e.to_string())?;
+        if let Some(old) = old {
+            if old != text {
+                let _ = app.clipboard().write_text(&old);
+            }
+        }
+        Ok(text)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -137,25 +200,20 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
-        .plugin(
-            tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|app, _shortcut, event| {
-                    if event.state() == ShortcutState::Pressed {
-                        toggle_quick(app);
-                    }
-                })
-                .build(),
-        )
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(
             tauri_plugin_sql::Builder::default()
                 .add_migrations("sqlite:immerso.db", migrations())
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![set_quick_hotkey])
+        .invoke_handler(tauri::generate_handler![set_quick_hotkeys, capture_selected])
         .setup(|app| {
-            // 默认 Alt+Q；前端起来后会按设置页的保存值重新注册
-            let _ = app.global_shortcut().register("alt+q");
+            // 默认：划词直加 Alt+Q、查词小窗 Ctrl+Shift+Space；前端起来后按设置页保存值重挂
+            if let Err(e) = register_hotkeys(app.handle(), Some("alt+q"), Some("ctrl+shift+space")) {
+                eprintln!("注册默认热键失败: {e}");
+            }
             Ok(())
         })
         .run(tauri::generate_context!())
