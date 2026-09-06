@@ -126,12 +126,16 @@ export default function Review({ onExit }: { onExit: () => void }) {
   const [idx, setIdx] = useState(0);
   const [revealed, setRevealed] = useState(false);
   const [intervals, setIntervals] = useState<{ grade: Grade; text: string }[] | null>(null);
-  const [answered, setAnswered] = useState(0);
   const [bug, setBug] = useState<string | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [answer, setAnswer] = useState("");
   const [phase, setPhase] = useState<"ask" | "right" | "wrong">("ask");
   const [pick, setPick] = useState<number | null>(null);
+  const [taughtId, setTaughtId] = useState<number | null>(null);
+  const [doneIds, setDoneIds] = useState<Set<number>>(new Set());
+  const [total, setTotal] = useState(0);
+  const [wrongIds, setWrongIds] = useState<Map<number, QueueItem>>(new Map());
+  const [retryCount, setRetryCount] = useState(0);
   const autoSpeak = useRef(false);
   const schedulingRef = useRef<Record<Grade, RecordLogItem> | null>(null);
   const autoGrade = useRef<Grade | null>(null);
@@ -147,7 +151,9 @@ export default function Review({ onExit }: { onExit: () => void }) {
         ]);
         setModes(ms);
         autoSpeak.current = ap !== "off";
-        setQueue(await getQueue(deck));
+        const q = await getQueue(deck);
+        setQueue(q);
+        setTotal(q.length);
       } catch (e) {
         setLoadErr(String(e));
       }
@@ -182,11 +188,13 @@ export default function Review({ onExit }: { onExit: () => void }) {
     ? "self"
     : mode;
   const typing = effMode === "dictation" || effMode === "listen" || effMode === "cloze";
+  // 新词教学：state 仍为 New 的卡首遇先教后测（重试卡携带新状态，不会重教）
+  const teaching = !!item && item.card.state === 0 && taughtId !== item.id;
 
-  // 听音拼写：出题即朗读
+  // 听音拼写：出题即朗读；教学卡出现即朗读
   useEffect(() => {
-    if (item && effMode === "listen" && phase === "ask") speak(item.word);
-  }, [item, effMode, phase]);
+    if (item && phase === "ask" && (teaching || effMode === "listen")) speak(item.word);
+  }, [item, effMode, phase, teaching]);
 
   const reveal = useCallback(() => {
     if (!item) return;
@@ -214,8 +222,28 @@ export default function Review({ onExit }: { onExit: () => void }) {
         setBug(String(e));
         return;
       }
-      setAnswered((n) => n + 1);
-      if (idx + 1 >= queue!.length) setQueue([]);
+      // 忘记 → 本轮内重现：携带最新 FSRS 状态，隔 3~5 张后换个方式再考
+      if (g === Rating.Again) {
+        const retryItem = { ...item, card: sched.card };
+        setQueue((q) => {
+          if (!q) return q;
+          const at = Math.min(idx + 3 + Math.floor(Math.random() * 3), q.length);
+          const next = [...q];
+          next.splice(at, 0, retryItem);
+          return next;
+        });
+        setRetryCount((n) => n + 1);
+        setWrongIds((m) => new Map(m).set(item.id, retryItem));
+        setDoneIds((s) => {
+          const n = new Set(s);
+          n.delete(item.id);
+          return n;
+        });
+      } else {
+        setDoneIds((s) => new Set(s).add(item.id));
+      }
+      // 末尾评忘记时上面已把重试卡接回队尾，照常推进即可
+      if (idx + 1 >= queue!.length && g !== Rating.Again) setQueue([]);
       else {
         setIdx(idx + 1);
         setRevealed(false);
@@ -291,6 +319,13 @@ export default function Review({ onExit }: { onExit: () => void }) {
     const h = (e: KeyboardEvent) => {
       if (!item) return;
       if (e.key === "Escape") return onExit();
+      if (teaching) {
+        if (e.key === " " || e.key === "Enter") {
+          e.preventDefault();
+          setTaughtId(item.id);
+        }
+        return;
+      }
       if (typing && phase === "ask") return; // 输入框自己处理回车
       if (phase === "right" && autoGrade.current !== null) {
         if (e.key === "Enter" || e.key === " ") {
@@ -332,7 +367,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [item, revealed, phase, typing, mode, choice, flip, grade, pickChoice, onExit]);
+  }, [item, revealed, phase, typing, mode, choice, teaching, flip, grade, pickChoice, onExit]);
 
   if (queue === null || modes === null) {
     return (
@@ -343,12 +378,52 @@ export default function Review({ onExit }: { onExit: () => void }) {
   }
 
   if (queue.length === 0) {
+    const wrongList = [...wrongIds.values()];
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-5">
         <Icon name="check" size={36} className="accent-text animate-check-in" strokeWidth={1.4} />
         <p className="text-xl t1 word-serif">今日完成</p>
-        {answered > 0 && <p className="t3 text-[13px] num">本轮 {answered} 张</p>}
-        <button onClick={onExit} className="mt-3 link text-sm hairline pt-1">
+        <p className="t3 text-[13px] num">
+          本轮 {doneIds.size} 词{retryCount > 0 ? ` · 重试 ${retryCount} 次` : ""}
+        </p>
+        {wrongList.length > 0 && (
+          <div className="w-full max-w-sm text-left">
+            <p className="text-xs t4 mb-2">本轮忘记 · {wrongList.length} 词</p>
+            <div className="border-t border-[var(--border)]">
+              {wrongList.map((wq) => (
+                <div key={wq.id} className="flex items-baseline gap-4 py-2 border-b border-[var(--border)]">
+                  <span className="word-serif text-[15px] t1 shrink-0">{wq.word}</span>
+                  <span className="text-xs t3 truncate">{firstLine(wq.dict?.translation)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {wrongList.length > 0 ? (
+          <button
+            onClick={() => {
+              const items = shuffle([...wrongList]);
+              setQueue(items);
+              setTotal(items.length);
+              setDoneIds(new Set());
+              setWrongIds(new Map());
+              setRetryCount(0);
+              setIdx(0);
+              setRevealed(false);
+              setIntervals(null);
+              setAnswer("");
+              setPhase("ask");
+              setPick(null);
+              shownAt.current = Date.now();
+            }}
+            className="btn-ink rounded-md px-8 py-2.5 text-sm"
+          >
+            再练一轮错词
+          </button>
+        ) : (
+          <p className="t3 text-[13px]">一个都没忘，漂亮</p>
+        )}
+        <button onClick={onExit} className="mt-1 link text-sm hairline pt-1">
           回到首页
         </button>
         <DoneSync />
@@ -356,7 +431,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
     );
   }
 
-  const progress = answered / queue.length;
+  const progress = total > 0 ? doneIds.size / total : 0;
   const promptWord = effMode === "choice_en" || effMode === "self";
 
   return (
@@ -383,7 +458,34 @@ export default function Review({ onExit }: { onExit: () => void }) {
       {/* 出题区 */}
       <div className="flex-1 flex flex-col items-center justify-center px-8 select-none">
         {!revealed ? (
-          effMode === "self" ? (
+          teaching ? (
+            /* 新词教学卡：先认识，再进练习 */
+            <div key={item!.id} className="text-center w-full max-w-xl animate-card-in">
+              <div className="word-serif text-6xl t1 tracking-wide">{item!.word}</div>
+              {item!.dict?.phonetic && item!.dict.phonetic.toLowerCase() !== item!.word.toLowerCase() && (
+                <p className="mt-4 num text-sm t3">/{item!.dict.phonetic}/</p>
+              )}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  speak(item!.word);
+                }}
+                className="mt-4 t3 hover:text-[var(--text)] transition-colors inline-flex"
+                title="发音"
+              >
+                <Icon name="speaker" size={15} />
+              </button>
+              <div className="mt-6 text-base space-y-0.5">
+                <Translation text={item!.dict?.translation ?? "（词典里没有这条）"} />
+              </div>
+              {item!.sourceContext && (
+                <blockquote className="mt-4 border-l-2 border-[var(--accent-dim)] pl-4 text-left text-sm t3 italic">
+                  {item!.sourceContext}
+                </blockquote>
+              )}
+              <p className="mt-12 text-xs t4 animate-pulse">空格 · 认识它了，开始练习</p>
+            </div>
+          ) : effMode === "self" ? (
             <div
               key={item!.id}
               className="text-center cursor-pointer animate-card-in w-full"
