@@ -1,7 +1,7 @@
 {
   "name": "immerso",
   "private": true,
-  "version": "0.8.0",
+  "version": "0.9.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -18,6 +18,8 @@
     "@tauri-apps/plugin-notification": "^2.4.0",
     "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-sql": "^2.4.1",
+    "lucide": "^1.41.0",
+    "morphicons": "^1.7.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "ts-fsrs": "^5.4.2"

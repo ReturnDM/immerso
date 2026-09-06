@@ -36,12 +36,6 @@ const GRADE_LABEL: Record<number, string> = {
   [Rating.Good]: "良好",
   [Rating.Easy]: "简单",
 };
-const GRADE_VAR: Record<number, string> = {
-  [Rating.Again]: "var(--key-again)",
-  [Rating.Hard]: "var(--key-hard)",
-  [Rating.Good]: "var(--key-good)",
-  [Rating.Easy]: "var(--key-easy)",
-};
 
 const norm = (s: string) => s.trim().toLowerCase();
 const shuffle = <T,>(a: T[]): T[] =>
@@ -261,11 +255,11 @@ export default function Review({ onExit }: { onExit: () => void }) {
   if (queue.length === 0) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-5">
-        <Icon name="check" size={44} className="accent-text" />
-        <p className="text-xl t1">今日完成</p>
-        {answered > 0 && <p className="t3 text-sm">本轮 {answered} 张</p>}
-        <button onClick={onExit} className="mt-2 border border-[var(--border)] rounded-lg px-6 py-2.5 t2 text-sm hover:border-[var(--accent)] accent-text transition-colors">
-          回首页
+        <Icon name="check" size={36} className="accent-text" strokeWidth={1.4} />
+        <p className="text-xl t1 word-serif">今日完成</p>
+        {answered > 0 && <p className="t3 text-[13px] num">本轮 {answered} 张</p>}
+        <button onClick={onExit} className="mt-3 link text-sm hairline pt-1">
+          回到首页
         </button>
         <DoneSync />
       </div>
@@ -283,7 +277,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
           <button onClick={onExit} className="link-strong" title="退出">
             <Icon name="close" size={16} />
           </button>
-          <span className="mx-auto tabular-nums t2 text-[13px]">
+          <span className="mx-auto num text-[13px] t2">
             {idx + 1} / {queue.length}
           </span>
           <span className="t3 text-[13px]">
@@ -305,21 +299,21 @@ export default function Review({ onExit }: { onExit: () => void }) {
               className="text-center cursor-pointer animate-card-in w-full"
               onClick={flip}
             >
-              <div className="word-serif text-6xl t1 tracking-wide">{item!.word}</div>
-              {item!.dict?.phonetic && (
-                <p className="mt-3 accent-text opacity-70 text-sm">/{item!.dict.phonetic}/</p>
+              <div className="word-serif text-7xl t1 tracking-wide">{item!.word}</div>
+              {item!.dict?.phonetic && item!.dict.phonetic.toLowerCase() !== item!.word.toLowerCase() && (
+                <p className="mt-4 num text-sm t3">/{item!.dict.phonetic}/</p>
               )}
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   speak(item!.word);
                 }}
-                className="mt-5 t3 hover:text-[var(--accent)] transition-colors inline-flex"
+                className="mt-6 t3 hover:text-[var(--text)] transition-colors inline-flex"
                 title="发音"
               >
-                <Icon name="speaker" />
+                <Icon name="speaker" size={15} />
               </button>
-              <p className="mt-14 text-xs t4 animate-pulse">空格 翻面</p>
+              <p className="mt-16 text-xs t4 animate-pulse">空格 翻面</p>
             </div>
           ) : typing ? (
             <div key={item!.id} className="text-center w-full max-w-xl animate-card-in">
@@ -337,10 +331,10 @@ export default function Review({ onExit }: { onExit: () => void }) {
                     e.stopPropagation();
                     speak(item!.word);
                   }}
-                  className="mt-4 t2 hover:text-[var(--accent)] transition-colors inline-flex mx-auto"
+                  className="mt-4 t2 hover:text-[var(--text)] transition-colors inline-flex mx-auto"
                   title="重听"
                 >
-                  <Icon name="speaker" size={30} />
+                  <Icon name="speaker" size={22} />
                 </button>
               )}
               {effMode === "dictation" && item!.dict?.definition && (
@@ -361,10 +355,9 @@ export default function Review({ onExit }: { onExit: () => void }) {
                 placeholder="输入英文后回车"
                 spellCheck={false}
                 autoComplete="off"
-                className="mt-8 w-72 field rounded-lg px-5 py-3 text-lg text-center outline-none
-                           placeholder:text-[var(--t4)] focus:border-[var(--accent)] transition-colors t1"
+                className="word-serif field mt-9 w-80 px-2 py-2.5 text-2xl text-center t1"
               />
-              <p className="mt-4 text-xs t4">
+              <p className="mt-5 text-xs t4">
                 {effMode === "listen" ? "回车提交 · 可点喇叭重听" : "回车提交"}
               </p>
             </div>
@@ -372,9 +365,9 @@ export default function Review({ onExit }: { onExit: () => void }) {
             <div key={item!.id} className="text-center w-full max-w-lg animate-card-in">
               {effMode === "choice_en" ? (
                 <>
-                  <div className="word-serif text-5xl t1">{item!.word}</div>
-                  {item!.dict?.phonetic && (
-                    <p className="mt-2 accent-text opacity-70 text-sm">/{item!.dict.phonetic}/</p>
+                  <div className="word-serif text-6xl t1">{item!.word}</div>
+                  {item!.dict?.phonetic && item!.dict.phonetic.toLowerCase() !== item!.word.toLowerCase() && (
+                    <p className="mt-3 num text-sm t3">/{item!.dict.phonetic}/</p>
                   )}
                 </>
               ) : (
@@ -382,27 +375,28 @@ export default function Review({ onExit }: { onExit: () => void }) {
                   <Translation text={item!.dict?.translation ?? "（词典缺释义）"} />
                 </div>
               )}
-              <div className="mt-10 flex flex-col gap-2">
+              <div className="mt-10 w-full border-t border-[var(--border)]">
                 {choice!.opts.map((opt, i) => {
                   const isCorrect = opt === choice!.correct;
                   const picked = pick === i;
                   const cls =
                     phase === "ask"
-                      ? "border-[var(--border)] hover:border-[var(--accent)]"
+                      ? "t2 hover:text-[var(--text)] hover:bg-[var(--hover)]"
                       : isCorrect
-                        ? "border-[var(--accent)] accent-text"
+                        ? "accent-text"
                         : picked
-                          ? "border-red-900 text-red-400"
-                          : "border-[var(--border)] t4";
+                          ? "text-rose-400"
+                          : "t4";
                   return (
                     <button
                       key={i}
                       onClick={() => pickChoice(i)}
                       disabled={phase !== "ask"}
-                      className={`w-full text-left border rounded-lg px-4 py-3 transition-colors flex items-center gap-3 ${cls}`}
+                      className={`w-full text-left px-3 py-3.5 transition-colors flex items-center gap-4
+                                  border-b border-[var(--border)] disabled:cursor-default ${cls}`}
                     >
-                      <span className="keycap t3">{i + 1}</span>
-                      <span className={effMode === "choice_zh" ? "word-serif text-lg" : "text-sm t2"}>
+                      <span className="num text-xs t4 w-4 shrink-0">{i + 1}</span>
+                      <span className={effMode === "choice_zh" ? "word-serif text-lg" : "text-sm"}>
                         {opt}
                       </span>
                     </button>
@@ -415,32 +409,32 @@ export default function Review({ onExit }: { onExit: () => void }) {
         ) : (
           /* 揭晓 */
           <div key={`r${item!.id}`} className="text-center max-w-xl w-full animate-card-in">
-            {phase === "right" && typing && <p className="mb-3 accent-text text-sm">✓ 正确</p>}
+            {phase === "right" && typing && <p className="mb-4 accent-text text-sm">✓ 正确</p>}
             {phase === "right" && (effMode === "choice_en" || effMode === "choice_zh") && (
-              <p className="mb-3 accent-text text-sm">✓ 答对了</p>
+              <p className="mb-4 accent-text text-sm">✓ 答对了</p>
             )}
             {phase === "wrong" && typing && (
-              <p className="mb-3 text-rose-400 text-sm">
+              <p className="mb-4 text-rose-400 text-sm">
                 ✗ 你写的是「{answer.trim() || "（空）"}」
               </p>
             )}
             {phase === "wrong" && (effMode === "choice_en" || effMode === "choice_zh") && (
-              <p className="mb-3 text-rose-400 text-sm">✗ 答错了，正确答案高亮如下</p>
+              <p className="mb-4 text-rose-400 text-sm">✗ 答错了，正确答案高亮如下</p>
             )}
-            <div className="word-serif text-4xl t1">{item!.word}</div>
-            {item!.dict?.phonetic && (
-              <p className="mt-2 accent-text opacity-80 text-sm">/{item!.dict.phonetic}/</p>
+            <div className="word-serif text-5xl t1">{item!.word}</div>
+            {item!.dict?.phonetic && item!.dict.phonetic.toLowerCase() !== item!.word.toLowerCase() && (
+              <p className="mt-3 num text-sm t3">/{item!.dict.phonetic}/</p>
             )}
-            <div className="mt-5 text-base space-y-0.5">
+            <div className="mt-6 text-base space-y-0.5">
               <Translation text={item!.dict?.translation ?? "（词典里没有这条）"} />
             </div>
             {item!.dict?.definition && (
-              <p className="mt-3 text-sm t3 italic leading-relaxed line-clamp-3">
+              <p className="mt-4 text-sm t3 italic leading-relaxed line-clamp-3">
                 {item!.dict.definition.replace(/\\n/g, "; ")}
               </p>
             )}
             {item!.sourceContext && (
-              <blockquote className="mt-4 border-l-2 border-[var(--accent-dim)] pl-4 text-left text-sm t3 italic">
+              <blockquote className="mt-5 border-l-2 border-[var(--accent-dim)] pl-4 text-left text-sm t3 italic">
                 {item!.sourceContext}
               </blockquote>
             )}
@@ -449,9 +443,9 @@ export default function Review({ onExit }: { onExit: () => void }) {
                 e.stopPropagation();
                 speak(item!.word);
               }}
-              className="mt-4 t3 hover:text-[var(--accent)] transition-colors inline-flex"
+              className="mt-5 t3 hover:text-[var(--text)] transition-colors inline-flex"
             >
-              <Icon name="speaker" />
+              <Icon name="speaker" size={15} />
             </button>
           </div>
         )}
@@ -467,10 +461,10 @@ export default function Review({ onExit }: { onExit: () => void }) {
           <div className="mx-auto max-w-xs">
             <button
               onClick={() => autoGrade.current !== null && void grade(autoGrade.current)}
-              className="w-full rounded-lg border border-[var(--accent-dim)] accent-text px-2 py-2.5 text-sm transition-colors hover:bg-[var(--hover)]"
+              className="btn-ink w-full rounded-md px-2 py-3 text-sm"
             >
               继续 · 评「{GRADE_LABEL[autoGrade.current]}」
-              <span className="t4 text-xs ml-1">Enter</span>
+              <span className="opacity-50 text-xs ml-2 num">Enter</span>
             </button>
           </div>
         ) : revealed && intervals ? (
@@ -481,15 +475,13 @@ export default function Review({ onExit }: { onExit: () => void }) {
                 <button
                   key={g}
                   onClick={() => void grade(g)}
-                  className="rounded-lg border border-transparent hover:border-[var(--border)] hover:bg-[var(--hover)] px-2 py-3 transition-colors"
+                  className="rounded-md px-2 py-3 transition-colors hover:bg-[var(--hover)]"
                 >
-                  <span className="flex items-center justify-center gap-2">
-                    <span className="keycap" style={{ color: GRADE_VAR[g] }}>
-                      {i + 1}
-                    </span>
-                    <span className="t2 text-sm">{GRADE_LABEL[g]}</span>
+                  <span className="flex items-baseline justify-center gap-2">
+                    <span className="num text-xs t4">{i + 1}</span>
+                    <span className="t1 text-sm">{GRADE_LABEL[g]}</span>
                   </span>
-                  <span className="block text-[11px] t4 mt-1.5 tabular-nums">
+                  <span className="block num text-[11px] t4 mt-1.5">
                     {intervals.find((o) => o.grade === g)?.text}
                   </span>
                 </button>

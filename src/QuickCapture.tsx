@@ -100,12 +100,12 @@ export default function QuickCapture() {
   const hasWord = word.trim().length > 0;
 
   return (
-    <div className="absolute inset-0 rounded-2xl surface shadow-none flex flex-col px-5 py-4 overflow-hidden animate-fade-in">
+    <div className="absolute inset-0 rounded-2xl border border-[var(--border)] bg-[var(--bg)] flex flex-col px-5 py-4 overflow-hidden animate-fade-in">
       <div className="flex items-baseline">
         <span className="text-xs tracking-[0.3em] t3 select-none" data-tauri-drag-region>
           快速收词
         </span>
-        <span className="ml-auto text-[11px] t4">Enter 收词 · Esc 收起</span>
+        <span className="ml-auto text-[11px] t4 num">Enter 收词 · Esc 收起</span>
       </div>
       <div className="waterline mt-2">
         <i style={{ width: hasWord ? "100%" : "0%" }} />
@@ -145,15 +145,15 @@ export default function QuickCapture() {
         )}
       </div>
 
-      <div className="mt-auto flex flex-wrap items-center gap-1.5">
+      <div className="mt-auto flex flex-wrap items-center gap-2">
         {decks.map((d) => (
           <button
             key={d}
             onClick={() => setDeck(d)}
-            className={`rounded-full px-2.5 py-1 text-xs border transition-colors ${
+            className={`rounded-full px-3 py-1 text-xs transition-colors ${
               deck === d
-                ? "bg-teal-700 text-white border-teal-700"
-                : "t3 border-[var(--border)] hover:border-[var(--accent)] hover:text-[var(--text)]"
+                ? "btn-ink"
+                : "t3 border border-[var(--border)] hover:text-[var(--text)] hover:border-[var(--t3)]"
             }`}
           >
             {d}

@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { MorphIcon } from "morphicons/react";
+import { Sun, Moon } from "lucide";
 import {
   getDailyNew,
   getEnabledModes,
@@ -23,6 +25,38 @@ const HOTKEY_OPTIONS: { v: string; label: string }[] = [
   { v: "", label: "关闭" },
 ];
 
+function Section({
+  title,
+  desc,
+  children,
+  first,
+}: {
+  title: string;
+  desc?: string;
+  children: React.ReactNode;
+  first?: boolean;
+}) {
+  return (
+    <section className={`${first ? "" : "border-t border-[var(--border)]"} py-5`}>
+      <p className="t1 text-[13px]">{title}</p>
+      {desc && <p className="mt-1 text-xs t3">{desc}</p>}
+      <div className="mt-3">{children}</div>
+    </section>
+  );
+}
+
+function OptionRow({ label, desc, children }: { label: string; desc?: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center py-2">
+      <div className="min-w-0">
+        <p className="t2 text-sm">{label}</p>
+        {desc && <p className="mt-0.5 text-xs t4">{desc}</p>}
+      </div>
+      <div className="ml-auto flex-none pl-4">{children}</div>
+    </div>
+  );
+}
+
 function Segmented<T extends string>({
   value,
   options,
@@ -33,13 +67,15 @@ function Segmented<T extends string>({
   onChange: (v: T) => void;
 }) {
   return (
-    <div className="inline-flex rounded-lg border border-[var(--border)] p-0.5">
+    <div className="inline-flex gap-4 text-xs">
       {options.map((o) => (
         <button
           key={o.v}
           onClick={() => onChange(o.v)}
-          className={`px-3 py-1 rounded-md text-xs transition-colors ${
-            value === o.v ? "bg-teal-700 text-white" : "t3 hover:text-[var(--text)]"
+          className={`pb-0.5 border-b transition-colors ${
+            value === o.v
+              ? "border-[var(--accent)] accent-text"
+              : "border-transparent t3 hover:text-[var(--text)]"
           }`}
         >
           {o.label}
@@ -66,16 +102,34 @@ function Check({
       className="w-full flex items-start gap-3 text-left py-2 group"
     >
       <span
-        className={`mt-0.5 w-4 h-4 rounded border flex-none inline-flex items-center justify-center transition-colors ${
-          on ? "border-teal-700 bg-teal-700 text-white" : "border-[var(--border)] group-hover:border-[var(--accent)]"
+        className={`mt-0.5 w-3.5 h-3.5 rounded-[3px] border flex-none inline-flex items-center justify-center transition-colors ${
+          on ? "border-[var(--accent)] accent-text" : "border-[var(--border)] group-hover:border-[var(--t3)]"
         }`}
       >
-        {on && <Icon name="check" size={11} strokeWidth={3} />}
+        {on && <Icon name="check" size={10} strokeWidth={2.5} />}
       </span>
       <span>
         <span className={`text-sm ${on ? "t1" : "t2"}`}>{label}</span>
         <span className="block text-xs t4 mt-0.5">{desc}</span>
       </span>
+    </button>
+  );
+}
+
+function Switch({ on, onToggle, title }: { on: boolean; onToggle: () => void; title?: string }) {
+  return (
+    <button
+      onClick={onToggle}
+      title={title}
+      className={`relative w-9 h-5 rounded-full transition-colors ${
+        on ? "bg-[var(--ink)]" : "border border-[var(--border)]"
+      }`}
+    >
+      <span
+        className={`absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full transition-all ${
+          on ? "left-[calc(100%-1.25rem)] bg-[var(--ink-text)]" : "left-1 bg-[var(--t3)]"
+        }`}
+      />
     </button>
   );
 }
@@ -130,6 +184,12 @@ export default function Settings({ onBack }: { onBack: () => void }) {
     }
   };
 
+  const toggleTheme = () => {
+    const next: Theme = theme === "dark" ? "light" : "dark";
+    setTheme(next);
+    changeTheme(next);
+  };
+
   const toggleMode = (id: ExMode) => {
     if (!modes) return;
     const next = modes.includes(id) ? modes.filter((m) => m !== id) : [...modes, id];
@@ -170,33 +230,28 @@ export default function Settings({ onBack }: { onBack: () => void }) {
         <span className="w-10" />
       </div>
 
-      <div className="mt-8 w-full max-w-xl flex flex-col gap-3">
-        {/* 外观 */}
-        <div className="surface rounded-xl px-5 py-4 flex items-center">
-          <div>
-            <p className="t1 text-sm">外观</p>
-            <p className="mt-1 text-xs t3">深色墨潭 / 浅色宣纸</p>
-          </div>
-          <div className="ml-auto">
-            <Segmented
-              value={theme}
-              options={[
-                { v: "dark" as Theme, label: "深色" },
-                { v: "light" as Theme, label: "浅色" },
-              ]}
-              onChange={(v) => {
-                setTheme(v);
-                changeTheme(v);
-              }}
-            />
-          </div>
-        </div>
+      <div className="mt-4 w-full max-w-xl">
+        <Section title="外观" desc="宣纸 / 淡墨" first>
+          <OptionRow label="深色模式">
+            <button
+              onClick={toggleTheme}
+              title={theme === "dark" ? "切到浅色" : "切到深色"}
+              className="w-8 h-8 rounded-full inline-flex items-center justify-center t2 hover:text-[var(--text)] hover:bg-[var(--hover)] transition-colors"
+            >
+              <MorphIcon
+                icon={theme === "dark" ? Moon : Sun}
+                size={16}
+                strokeWidth={1.6}
+                spring="snappy"
+                reducedMotion="user"
+                label={theme === "dark" ? "切到浅色" : "切到深色"}
+              />
+            </button>
+          </OptionRow>
+        </Section>
 
-        {/* 练习模式 */}
-        <div className="surface rounded-xl px-5 py-4">
-          <p className="t1 text-sm">练习方式</p>
-          <p className="mt-1 text-xs t3">复习时从勾选的方式中随机出题</p>
-          <div className="mt-2 divide-y divide-[var(--border)]">
+        <Section title="练习方式" desc="复习时从勾选的方式中随机出题">
+          <div className="divide-y divide-[var(--border)]">
             {EX_MODES.map((m) => (
               <Check
                 key={m.id}
@@ -207,13 +262,10 @@ export default function Settings({ onBack }: { onBack: () => void }) {
               />
             ))}
           </div>
-        </div>
+        </Section>
 
-        {/* 每日新词量 */}
-        <div className="surface rounded-xl px-5 py-4">
-          <p className="t1 text-sm">每日新词量</p>
-          <p className="mt-1 text-xs t3">每天最多引入的新卡数，到期复习不受限</p>
-          <div className="mt-3 flex items-center gap-3">
+        <Section title="每日新词量" desc="每天最多引入的新卡数，到期复习不受限">
+          <div className="flex items-center gap-4">
             <input
               value={quota}
               onChange={(e) => setQuota(e.target.value.replace(/[^\d]/g, ""))}
@@ -221,106 +273,69 @@ export default function Settings({ onBack }: { onBack: () => void }) {
                 if (!e.target.value || Number(e.target.value) < 1) setQuota("10");
               }}
               inputMode="numeric"
-              className="w-20 field rounded-lg px-3 py-1.5 text-base outline-none focus:border-[var(--accent)] transition-colors tabular-nums t1"
+              className="field num w-16 px-1 py-1 text-base t1"
             />
             <button
               onClick={saveQuota}
-              className={`text-xs rounded-md px-3 py-1.5 transition-colors ${
-                saved ? "accent-text bg-[var(--accent-dim)]" : "t3 hover:text-[var(--text)] hover:bg-[var(--hover)]"
+              className={`text-xs transition-colors ${
+                saved ? "accent-text" : "t3 hover:text-[var(--text)]"
               }`}
             >
               {saved ? "已保存" : "保存"}
             </button>
           </div>
-        </div>
+        </Section>
 
-        {/* 发音 */}
-        <div className="surface rounded-xl px-5 py-4 flex items-center">
-          <div>
-            <p className="t1 text-sm">自动发音</p>
-            <p className="mt-1 text-xs t3">揭示答案时朗读单词</p>
-          </div>
-          <button
-            onClick={() => {
-              const next = !autoSpeak;
-              setAutoSpeak(next);
-              void setSetting("auto_pronounce", next ? "on" : "off");
-            }}
-            className={`ml-auto relative w-10 h-[22px] rounded-full transition-colors ${
-              autoSpeak ? "bg-teal-700" : "bg-[var(--border)]"
-            }`}
-          >
-            <span
-              className={`absolute top-[3px] w-4 h-4 rounded-full bg-zinc-200 transition-all ${
-                autoSpeak ? "left-[21px]" : "left-[3px]"
-              }`}
-            />
-          </button>
-        </div>
-
-        {/* 快速收词：划词直加 + 查词小窗 */}
-        <div className="surface rounded-xl px-5 py-4">
-          <p className="t1 text-sm">快速收词</p>
-          <div className="mt-2 divide-y divide-[var(--border)]">
-            <div className="flex items-center py-2">
-              <div>
-                <p className="t1 text-sm">划词直加入书</p>
-                <p className="mt-1 text-xs t3">选中单词按热键，直接收进上次用的词书并弹通知</p>
-              </div>
-              <div className="ml-auto flex-none">
-                <Segmented
-                  value={hotkeyDirect}
-                  options={HOTKEY_OPTIONS}
-                  onChange={(v) => void changeHotkey("direct", v)}
-                />
-              </div>
-            </div>
-            <div className="flex items-center py-2">
-              <div>
-                <p className="t1 text-sm">查词小窗</p>
-                <p className="mt-1 text-xs t3">呼出小窗即时查释义，回车确认收词</p>
-              </div>
-              <div className="ml-auto flex-none">
-                <Segmented
-                  value={hotkeyPopup}
-                  options={HOTKEY_OPTIONS}
-                  onChange={(v) => void changeHotkey("popup", v)}
-                />
-              </div>
-            </div>
+        <Section title="快速收词">
+          <div className="divide-y divide-[var(--border)]">
+            <OptionRow label="划词直加入书" desc="选中单词按热键，直接收进上次用的词书并弹通知">
+              <Segmented
+                value={hotkeyDirect}
+                options={HOTKEY_OPTIONS}
+                onChange={(v) => void changeHotkey("direct", v)}
+              />
+            </OptionRow>
+            <OptionRow label="查词小窗" desc="呼出小窗即时查释义，回车确认收词">
+              <Segmented
+                value={hotkeyPopup}
+                options={HOTKEY_OPTIONS}
+                onChange={(v) => void changeHotkey("popup", v)}
+              />
+            </OptionRow>
           </div>
           {hotkeyMsg && <p className="mt-2 text-xs text-rose-400">{hotkeyMsg}</p>}
-        </div>
+        </Section>
 
-        {/* 云同步 */}
-        <div className="surface rounded-xl px-5 py-4">
-          <div className="flex items-center">
-            <div>
-              <p className="t1 text-sm">云同步</p>
-              <p className="mt-1 text-xs t3">
-                数据自动同步到你的 GitHub 私有 Gist；两台设备配同一个 Token 即可互相同步
-              </p>
-            </div>
-            <button
-              onClick={() => {
-                const next = !autoCloud;
-                setAutoCloud(next);
-                void setSetting("auto_cloud_sync", next ? "on" : "off");
+        <Section title="自动发音" desc="揭示答案时朗读单词">
+          <OptionRow label="复习时自动朗读">
+            <Switch
+              on={autoSpeak}
+              onToggle={() => {
+                const next = !autoSpeak;
+                setAutoSpeak(next);
+                void setSetting("auto_pronounce", next ? "on" : "off");
               }}
-              className={`ml-auto relative w-10 h-[22px] rounded-full transition-colors flex-none ${
-                autoCloud ? "bg-teal-700" : "bg-[var(--border)]"
-              }`}
-              title="打开应用和复习结束后自动同步"
-            >
-              <span
-                className={`absolute top-[3px] w-4 h-4 rounded-full bg-zinc-200 transition-all ${
-                  autoCloud ? "left-[21px]" : "left-[3px]"
-                }`}
+            />
+          </OptionRow>
+        </Section>
+
+        <Section title="云同步" desc="数据自动同步到你的 GitHub 私有 Gist；两台设备配同一个 Token 即可互相同步">
+          <div className="flex items-center">
+            <span className="text-sm t2">自动同步</span>
+            <span className="ml-auto">
+              <Switch
+                on={autoCloud}
+                onToggle={() => {
+                  const next = !autoCloud;
+                  setAutoCloud(next);
+                  void setSetting("auto_cloud_sync", next ? "on" : "off");
+                }}
+                title="打开应用和复习结束后自动同步"
               />
-            </button>
+            </span>
           </div>
 
-          <div className="mt-3 flex items-center gap-2">
+          <div className="mt-3 flex items-center gap-3">
             {ghToken ? (
               <>
                 <span className="text-xs accent-text">✓ 已配置（{ghToken.slice(0, 6)}…）</span>
@@ -339,8 +354,7 @@ export default function Settings({ onBack }: { onBack: () => void }) {
                   placeholder="粘贴 GitHub Token（gist 权限）"
                   type="password"
                   spellCheck={false}
-                  className="flex-1 field rounded-lg px-3 py-1.5 text-xs outline-none
-                             placeholder:text-[var(--t4)] focus:border-[var(--accent)] transition-colors t1"
+                  className="field flex-1 px-1 py-1 text-xs t1"
                 />
                 <button
                   onClick={async () => {
@@ -349,8 +363,7 @@ export default function Settings({ onBack }: { onBack: () => void }) {
                     setGhToken(tokenInput.trim());
                     setTokenInput("");
                   }}
-                  className="text-xs t3 border border-[var(--border)] rounded-md px-3 py-1.5
-                             hover:border-[var(--accent)] accent-text transition-colors flex-none"
+                  className="text-xs t3 hover:text-[var(--text)] transition-colors flex-none"
                 >
                   保存
                 </button>
@@ -358,7 +371,7 @@ export default function Settings({ onBack }: { onBack: () => void }) {
             )}
           </div>
 
-          <div className="mt-2 flex items-center gap-3 text-xs">
+          <div className="mt-3 flex items-center gap-4 text-xs">
             <button
               onClick={async () => {
                 setCloudBusy(true);
@@ -373,9 +386,7 @@ export default function Settings({ onBack }: { onBack: () => void }) {
                 }
               }}
               disabled={cloudBusy || !ghToken}
-              className="t3 border border-[var(--border)] rounded-md px-3 py-1.5
-                         hover:border-[var(--accent)] accent-text transition-colors
-                         disabled:opacity-40 disabled:cursor-wait"
+              className="t3 hover:text-[var(--text)] transition-colors disabled:opacity-40 disabled:cursor-wait"
             >
               {cloudBusy ? "同步中…" : "立即同步"}
             </button>
@@ -394,26 +405,22 @@ export default function Settings({ onBack }: { onBack: () => void }) {
             )}
           </div>
           {cloudMsg && <p className="mt-3 text-xs t2 break-all">{cloudMsg}</p>}
-        </div>
+        </Section>
 
-        {/* 数据同步（手动兜底） */}
-        <div className="surface rounded-xl px-5 py-4">
-          <p className="t1 text-sm">导出 / 导入</p>
-          <p className="mt-1 text-xs t3">
-            数据包备份，或在没有网络的机器之间手动搬运（合并规则：同一张卡取学得较新的那台，记录去重补插）
-          </p>
-          <div className="mt-3 flex items-center gap-2">
+        <Section
+          title="导出 / 导入"
+          desc="数据包备份，或在没有网络的机器之间手动搬运（合并规则：同一张卡取学得较新的那台，记录去重补插）"
+        >
+          <div className="flex items-center gap-5 text-xs">
             <button
               onClick={() => void exportData().then(setDataMsg)}
-              className="text-xs t3 border border-[var(--border)] rounded-md px-3 py-1.5
-                         hover:border-[var(--accent)] accent-text transition-colors"
+              className="t3 hover:text-[var(--text)] transition-colors"
             >
               导出数据包
             </button>
             <button
               onClick={() => void importData().then(setDataMsg)}
-              className="text-xs t3 border border-[var(--border)] rounded-md px-3 py-1.5
-                         hover:border-[var(--accent)] accent-text transition-colors"
+              className="t3 hover:text-[var(--text)] transition-colors"
             >
               导入合并
             </button>
@@ -422,30 +429,23 @@ export default function Settings({ onBack }: { onBack: () => void }) {
           <p className="mt-3 text-[11px] t4">
             匿词收藏无需备份——两台设备各自同步一遍即是同一份
           </p>
-        </div>
+        </Section>
 
-        {/* 匿词同步 */}
-        <div className="surface rounded-xl px-5 py-4">
-          <p className="t1 text-sm">匿词同步</p>
-          <p className="mt-1 text-xs t3">
-            只读拉取匿词收藏，新词带原句流入「生词本」
-          </p>
-          <div className="mt-3 flex items-center gap-3">
+        <Section title="匿词同步" desc="只读拉取匿词收藏，新词带原句流入「生词本」">
+          <div className="flex items-center gap-4 text-xs">
             <button
               onClick={sync}
               disabled={syncing}
-              className="text-xs t3 border border-[var(--border)] rounded-md px-3 py-1.5
-                         hover:border-[var(--accent)] accent-text transition-colors
-                         disabled:opacity-40 disabled:cursor-wait"
+              className="t3 hover:text-[var(--text)] transition-colors disabled:opacity-40 disabled:cursor-wait"
             >
               {syncing ? "同步中…" : "立即同步"}
             </button>
-            {lastSync && <span className="text-xs t4">上次 {lastSync}</span>}
+            {lastSync && <span className="t4">上次 {lastSync}</span>}
           </div>
           {syncMsg && <p className="mt-3 text-xs t2 break-all">{syncMsg}</p>}
-        </div>
+        </Section>
 
-        <p className="text-[11px] t4 text-center pt-1">
+        <p className="text-[11px] t4 text-center pt-6 border-t border-[var(--border)] mt-2">
           词典 ECDICT · 调度 FSRS-5 · 数据 %APPDATA%\com.returndm.immerso
         </p>
       </div>

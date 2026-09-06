@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
+import { MorphIcon } from "morphicons/react";
+import { Plus, Check } from "lucide";
 import {
   addWordToDeck,
   deleteCard,
@@ -12,14 +14,6 @@ import {
   type LibFilter,
 } from "../lib/db";
 import { stateLabel } from "../lib/fsrs";
-import { Icon } from "../components/Icon";
-
-function stateBadge(c: LibCard): { text: string; cls: string } {
-  if (c.suspended) return { text: "已搁置", cls: "border-[var(--border)] t4" };
-  if (c.state === 0) return { text: "新词", cls: "border-teal-900 text-teal-500" };
-  if (c.state === 2) return { text: "复习中", cls: "border-sky-900 text-sky-500" };
-  return { text: "巩固中", cls: "border-amber-900 text-amber-500" };
-}
 
 export default function Library({ onBack }: { onBack: () => void }) {
   const [decks, setDecks] = useState<{ name: string; total: number; learned: number }[]>([]);
@@ -79,7 +73,7 @@ export default function Library({ onBack }: { onBack: () => void }) {
               reload();
             });
           }}
-          className="text-xs border border-red-900 text-red-400 rounded-md px-2.5 py-1 hover:bg-red-950/60 transition-colors flex-none"
+          className="text-xs text-rose-400 hairline pt-0.5 flex-none hover:opacity-80 transition-opacity"
         >
           确认删除
         </button>
@@ -88,16 +82,23 @@ export default function Library({ onBack }: { onBack: () => void }) {
     return (
       <button
         onClick={() => void setCardSuspended(c.id, !c.suspended).then(reload)}
-        className="text-xs border border-[var(--border)] t3 rounded-md px-2.5 py-1 hover:border-[var(--accent)] accent-text transition-colors flex-none"
+        className="text-xs t4 hairline pt-0.5 hover:text-[var(--t2)] transition-colors flex-none"
       >
         {c.suspended ? "恢复" : "搁置"}
       </button>
     );
   };
 
+  const tabCls = (active: boolean) =>
+    `pb-1.5 -mb-px border-b-2 transition-colors ${
+      active
+        ? "border-[var(--accent)] accent-text"
+        : "border-transparent t3 hover:text-[var(--text)]"
+    }`;
+
   return (
     <div className="min-h-screen flex flex-col items-center px-6 pt-12 pb-10">
-      <div className="w-full max-w-xl flex items-center">
+      <div className="w-full max-w-2xl flex items-center">
         <button onClick={onBack} className="link-strong text-sm">
           ← 首页
         </button>
@@ -105,30 +106,23 @@ export default function Library({ onBack }: { onBack: () => void }) {
         <span className="w-10" />
       </div>
 
-      <p className="mt-3 w-full max-w-xl text-[11px] t4">
-        一个词可以同时属于多本词书，学习进度全词库共享
-      </p>
-
-      {/* 词库 chips */}
-      <div className="mt-2 w-full max-w-xl flex flex-wrap gap-2">
+      {/* 词书页签 */}
+      <div className="mt-8 w-full max-w-2xl flex flex-wrap gap-x-6 text-[13px]">
         {options.map((d) => (
           <button
             key={d.name}
             onClick={() => setDeck(d.name)}
-            className={`text-xs rounded-full px-3 py-1.5 border transition-colors ${
-              deck === d.name
-                ? "border-[var(--accent)] accent-text bg-[var(--accent-dim)]"
-                : "border-[var(--border)] t3 hover:border-[var(--accent)]"
-            }`}
+            className={tabCls(deck === d.name)}
           >
-            {d.name} <span className="opacity-60 tabular-nums">{d.total}</span>
+            {d.name}
+            <span className="num text-[11px] opacity-60 ml-1.5">{d.total}</span>
           </button>
         ))}
       </div>
 
       {/* 过滤 + 搜索 */}
-      <div className="mt-4 w-full max-w-xl flex items-center gap-3">
-        <div className="flex rounded-lg border border-[var(--border)] p-0.5">
+      <div className="mt-5 w-full max-w-2xl flex items-center gap-5">
+        <div className="flex gap-4 text-xs">
           {(
             [
               { v: "all" as LibFilter, label: "全部" },
@@ -139,56 +133,42 @@ export default function Library({ onBack }: { onBack: () => void }) {
             <button
               key={o.v}
               onClick={() => setFilter(o.v)}
-              className={`px-3 py-1 rounded-md text-xs transition-colors ${
-                filter === o.v ? "bg-teal-700 text-white" : "t3 hover:text-[var(--text)]"
-              }`}
+              className={tabCls(filter === o.v)}
             >
               {o.label}
             </button>
           ))}
         </div>
         <span className="relative inline-flex items-center flex-1">
-          <Icon name="search" size={14} className="absolute left-3 t4 pointer-events-none" />
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="搜单词…"
             spellCheck={false}
-            className="w-full field rounded-full pl-9 pr-4 py-1.5 text-sm outline-none placeholder:text-[var(--t4)] focus:border-[var(--accent)] transition-colors t1"
+            className="field w-full px-1 py-1 text-sm t1"
           />
         </span>
       </div>
 
-      {/* 列表 */}
-      <div className="mt-4 w-full max-w-xl flex flex-col gap-2 pb-10">
-        {cards.length === 0 && <p className="mt-8 text-center t4">没有符合条件的卡片</p>}
+      {/* 列表：发丝线分行 */}
+      <div className="mt-4 w-full max-w-2xl">
+        {cards.length === 0 && <p className="mt-10 text-center t4">没有符合条件的卡片</p>}
         {cards.map((c) => {
-          const badge = stateBadge(c);
           const wordDecks = decksByWord.get(c.word.toLowerCase()) ?? [];
           const others = allNames.filter((n) => !wordDecks.includes(n));
           const expanded = addId === c.id;
+          const hasIt = others.length === 0;
           return (
-            <div key={c.id} className="surface rounded-lg px-4 py-2.5">
-              <div className="flex items-center gap-3">
-                <span className={`t1 ${c.suspended ? "opacity-50" : ""}`}>{c.word}</span>
-                <span className="flex gap-1 flex-wrap min-w-0">
-                  {wordDecks.slice(0, 3).map((d) => (
-                    <span
-                      key={d}
-                      className="text-[10px] border border-[var(--border)] rounded-full px-1.5 py-0.5 t3"
-                    >
-                      {d}
-                    </span>
-                  ))}
-                  {wordDecks.length > 3 && (
-                    <span className="text-[10px] t4 self-center">+{wordDecks.length - 3}</span>
-                  )}
+            <div key={c.id} className="py-2.5 border-t border-[var(--border)]">
+              <div className="flex items-center gap-4">
+                <span className={`word-serif text-[15px] t1 shrink-0 ${c.suspended ? "opacity-40" : ""}`}>
+                  {c.word}
                 </span>
-                <span className={`text-[10px] border rounded-full px-2 py-0.5 shrink-0 ${badge.cls}`}>
-                  {c.suspended ? badge.text : stateLabel(c.state)}
+                <span className={`text-[11px] truncate min-w-0 ${c.suspended ? "t4" : "t3"}`}>
+                  {wordDecks.length > 0 ? wordDecks.join(" · ") : "—"}
                 </span>
-                <span className="ml-auto text-xs t4 shrink-0 hidden sm:inline">
-                  {c.reps > 0 ? `学过 ${c.reps} 次` : "未开始"}
+                <span className="ml-auto text-[11px] t4 shrink-0 hidden sm:inline">
+                  {c.suspended ? "已搁置" : c.reps > 0 ? `学过 ${c.reps} 次` : stateLabel(c.state)}
                 </span>
                 <button
                   onClick={() => {
@@ -196,35 +176,44 @@ export default function Library({ onBack }: { onBack: () => void }) {
                     setNewBook("");
                   }}
                   title="加入其他词书"
-                  className="text-xs t3 border border-[var(--border)] rounded-md px-1.5 py-1 hover:border-[var(--accent)] accent-text transition-colors flex-none inline-flex"
+                  className="t4 hover:text-[var(--text)] transition-colors flex-none inline-flex"
                 >
-                  <Icon name="plus" size={12} />
+                  <MorphIcon
+                    icon={expanded ? Check : Plus}
+                    size={14}
+                    strokeWidth={1.8}
+                    spring="snappy"
+                    reducedMotion="user"
+                    aria-hidden
+                  />
                 </button>
                 {rowAction(c)}
               </div>
               {expanded && (
-                <div className="mt-2 pt-2 border-t border-[var(--border)] flex flex-wrap items-center gap-2 text-xs">
-                  <span className="t4">加入：</span>
-                  {others.length > 0 ? (
-                    <select
-                      defaultValue=""
-                      onChange={(e) => {
-                        if (e.target.value) void joinDeck(c.word, e.target.value);
-                        setAddId(null);
-                      }}
-                      className="field rounded-md px-2 py-1 t2 outline-none focus:border-[var(--accent)] cursor-pointer"
-                    >
-                      <option value="" disabled>
-                        选择词书…
-                      </option>
-                      {others.map((n) => (
-                        <option key={n} value={n}>
-                          {n}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
+                <div className="mt-3 pt-3 border-t border-[var(--border)] flex flex-wrap items-center gap-4 text-xs">
+                  {hasIt ? (
                     <span className="t4">已在全部词书中</span>
+                  ) : (
+                    <>
+                      <span className="t4">加入：</span>
+                      <select
+                        defaultValue=""
+                        onChange={(e) => {
+                          if (e.target.value) void joinDeck(c.word, e.target.value);
+                          setAddId(null);
+                        }}
+                        className="field px-1 py-1 t2 cursor-pointer"
+                      >
+                        <option value="" disabled>
+                          选择词书…
+                        </option>
+                        {others.map((n) => (
+                          <option key={n} value={n}>
+                            {n}
+                          </option>
+                        ))}
+                      </select>
+                    </>
                   )}
                   <span className="t4">或自建：</span>
                   <input
@@ -232,14 +221,14 @@ export default function Library({ onBack }: { onBack: () => void }) {
                     onChange={(e) => setNewBook(e.target.value)}
                     placeholder="新词书名"
                     spellCheck={false}
-                    className="field rounded-md px-2 py-1 w-28 outline-none placeholder:text-[var(--t4)] focus:border-[var(--accent)] t1"
+                    className="field px-1 py-1 w-28 t1"
                   />
                   <button
                     onClick={() => {
                       void joinDeck(c.word, newBook).then(() => setAddId(null));
                     }}
                     disabled={!newBook.trim()}
-                    className="t3 border border-[var(--border)] rounded-md px-2 py-1 hover:border-[var(--accent)] accent-text transition-colors disabled:opacity-40"
+                    className="accent-text hairline pt-0.5 disabled:opacity-30 hover:opacity-80 transition-opacity"
                   >
                     创建
                   </button>
