@@ -100,9 +100,10 @@ export interface DeckInfo {
 export async function getDecks(): Promise<DeckInfo[]> {
   const db = await getApp();
   return db.select<DeckInfo[]>(
-    `SELECT deck AS name, COUNT(*) AS total,
-            SUM(CASE WHEN state != 0 THEN 1 ELSE 0 END) AS learned
-     FROM cards GROUP BY deck ORDER BY total DESC`,
+    `SELECT dw.deck AS name, COUNT(*) AS total,
+            SUM(CASE WHEN c.state != 0 THEN 1 ELSE 0 END) AS learned
+     FROM deck_words dw JOIN cards c ON c.word = dw.word
+     GROUP BY dw.deck ORDER BY total DESC`,
   );
 }
 
@@ -114,7 +115,7 @@ export const setCurrentDeck = (d: string) => setSetting("current_deck", d);
 
 function deckClause(deck: string): { sql: string; params: string[] } {
   return deck && deck !== "全部"
-    ? { sql: " AND c.deck = ?", params: [deck] }
+    ? { sql: " AND EXISTS (SELECT 1 FROM deck_words dw WHERE dw.word = c.word AND dw.deck = ?)", params: [deck] }
     : { sql: "", params: [] };
 }
 
@@ -174,6 +175,10 @@ export async function addCard(
   await db.execute(
     "INSERT INTO cards (word, source_id, deck) VALUES (?, ?, ?) ON CONFLICT(word) DO NOTHING",
     [word, sourceId, deck],
+  );
+  await db.execute(
+    "INSERT OR IGNORE INTO deck_words (word, deck) VALUES (?, ?)",
+    [word, deck],
   );
   return "added";
 }

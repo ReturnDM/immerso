@@ -175,7 +175,8 @@ export default function Review({ onExit }: { onExit: () => void }) {
   const pickChoice = useCallback(
     (i: number) => {
       if (!choice || phase !== "ask") return;
-      const { options: iv } = previewOptions(item!.card);
+      const { options: iv, scheduling } = previewOptions(item!.card);
+      schedulingRef.current = scheduling;
       setIntervals(iv);
       setRevealed(true);
       setPick(i);
@@ -204,11 +205,19 @@ export default function Review({ onExit }: { onExit: () => void }) {
         }
         return;
       }
-      if (revealed && ["1", "2", "3", "4"].includes(e.key)) {
-        const g = GRADE_ORDER[Number(e.key) - 1];
-        if (phase === "wrong" && g === Rating.Easy) return;
-        e.preventDefault();
-        void grade(g);
+      // 翻面/作答后的评分：数字键；self 模式 Enter = 良好
+      if (revealed) {
+        if (["1", "2", "3", "4"].includes(e.key)) {
+          const g = GRADE_ORDER[Number(e.key) - 1];
+          if (phase === "wrong" && g === Rating.Easy) return;
+          e.preventDefault();
+          void grade(g);
+          return;
+        }
+        if (phase === "ask" && effMode === "self" && e.key === "Enter") {
+          e.preventDefault();
+          void grade(Rating.Good);
+        }
         return;
       }
       if (effMode === "choice_en" || effMode === "choice_zh") {
@@ -453,7 +462,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
             </button>
           </div>
         ) : revealed && intervals ? (
-          <div className="mx-auto max-w-xl grid grid-cols-4 gap-2">
+          <div className="mx-auto max-w-xl grid grid-cols-4 gap-2 animate-fade-in">
             {GRADE_ORDER.map((g, i) => {
               if (phase === "wrong" && g === Rating.Easy) return null;
               return (

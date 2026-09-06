@@ -61,6 +61,19 @@ fn migrations() -> Vec<Migration> {
             sql: "ALTER TABLE cards ADD COLUMN deck TEXT NOT NULL DEFAULT '生词本';",
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 3,
+            description: "deck_words_many_to_many",
+            sql: r#"
+CREATE TABLE IF NOT EXISTS deck_words (
+  word TEXT NOT NULL,
+  deck TEXT NOT NULL,
+  PRIMARY KEY (word, deck)
+);
+INSERT OR IGNORE INTO deck_words (word, deck) SELECT word, deck FROM cards;
+"#,
+            kind: MigrationKind::Up,
+        },
     ]
 }
 
