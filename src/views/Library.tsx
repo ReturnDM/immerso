@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { MorphIcon } from "morphicons/react";
 import { Plus, Check } from "lucide";
 import {
@@ -9,6 +9,7 @@ import {
   getLibrary,
   getTodayStats,
   getWordDecks,
+  LIB_PAGE_SIZE,
   setCardSuspended,
   type LibCard,
   type LibFilter,
@@ -20,20 +21,68 @@ export default function Library({ onBack }: { onBack: () => void }) {
   const [deck, setDeck] = useState("全部");
   const [filter, setFilter] = useState<LibFilter>("all");
   const [q, setQ] = useState("");
-  const [cards, setCards] = useState<LibCard[]>([]);
   const [decksByWord, setDecksByWord] = useState<Map<string, string[]>>(new Map());
   const [confirmId, setConfirmId] = useState<number | null>(null);
   const [addId, setAddId] = useState<number | null>(null);
   const [newBook, setNewBook] = useState("");
   const [allNames, setAllNames] = useState<string[]>([]);
   const [totalCount, setTotalCount] = useState(0);
+  const [cards, setCards] = useState<LibCard[]>([]);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  /** 追加一页；page 0 = 重置列表（筛选条件变化时走这里） */
+  const load = useCallback(
+    async (d: string, f: LibFilter, query: string, pg: number) => {
+      setLoading(true);
+      try {
+        const rows = await getLibrary(d, f, query, pg);
+        setCards((cs) => (pg === 0 ? rows : [...cs, ...rows]));
+        setHasMore(rows.length === LIB_PAGE_SIZE);
+        setPage(pg);
+        void getWordDecks(rows.map((r) => r.word)).then((m) =>
+          pg === 0
+            ? setDecksByWord(m)
+            : setDecksByWord((prev) => {
+                const next = new Map(prev);
+                for (const [k, v] of m) next.set(k, v);
+                return next;
+              }),
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [],
+  );
+
+  // 筛选条件变化（防抖）：重置到第一页
+  useEffect(() => {
+    const t = setTimeout(() => void load(deck, filter, q, 0), q ? 200 : 0);
+    return () => clearTimeout(t);
+  }, [deck, filter, q, load]);
+
+  // 滚动到底自动加载下一页
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMore && !loading) {
+          void load(deck, filter, q, page + 1);
+        }
+      },
+      { rootMargin: "600px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [deck, filter, q, page, hasMore, loading, load]);
 
   const reload = useCallback(() => {
-    void getLibrary(deck, filter, q).then((cs) => {
-      setCards(cs);
-      void getWordDecks(cs.map((c) => c.word)).then(setDecksByWord);
-    });
-  }, [deck, filter, q]);
+    void load(deck, filter, q, 0);
+  }, [deck, filter, q, load]);
 
   const reloadDecks = useCallback(() => {
     void getDecks().then(setDecks);
@@ -44,11 +93,6 @@ export default function Library({ onBack }: { onBack: () => void }) {
   useEffect(() => {
     reloadDecks();
   }, [reloadDecks, cards]);
-
-  useEffect(() => {
-    const t = setTimeout(reload, q ? 200 : 0);
-    return () => clearTimeout(t);
-  }, [reload]);
 
   const options = [
     { name: "全部", total: totalCount },
@@ -237,6 +281,16 @@ export default function Library({ onBack }: { onBack: () => void }) {
             </div>
           );
         })}
+        {/* 无限滚动哨兵 */}
+        <div ref={sentinelRef} className="h-px" />
+        {loading && cards.length > 0 && (
+          <p className="py-3 text-center text-xs t4">加载中…</p>
+        )}
+        {!hasMore && cards.length > 0 && (
+          <p className="py-4 text-center text-[11px] t4">
+            共 {deck === "全部" ? totalCount : cards.length} 词
+          </p>
+        )}
       </div>
     </div>
   );

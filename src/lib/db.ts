@@ -339,10 +339,14 @@ export interface LibCard {
 
 export type LibFilter = "all" | "new" | "learned";
 
+export const LIB_PAGE_SIZE = 200;
+
+/** 分页取卡：page 从 0 起；排序稳定（id 升序），翻页不重不漏 */
 export async function getLibrary(
   deck: string,
   filter: LibFilter,
   q: string,
+  page: number = 0,
 ): Promise<LibCard[]> {
   const db = await getApp();
   const conds: string[] = ["1=1"];
@@ -357,10 +361,10 @@ export async function getLibrary(
     conds.push("word LIKE ?");
     params.push(q.trim() + "%");
   }
-  params.push(200);
+  params.push(LIB_PAGE_SIZE, page * LIB_PAGE_SIZE);
   return db.select<LibCard[]>(
     `SELECT id, word, state, reps, due, deck, suspended FROM cards
-     WHERE ${conds.join(" AND ")} ORDER BY id LIMIT ?`,
+     WHERE ${conds.join(" AND ")} ORDER BY id LIMIT ? OFFSET ?`,
     params,
   );
 }
