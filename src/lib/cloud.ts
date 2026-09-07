@@ -1,9 +1,9 @@
 // 云同步：GitHub 私有 Gist 作为同步存储
 // Token 存 ~/.immerso-gh-token（明文本机文件，与 .neath-api-key 同纪律，勿提交勿外传）
 // 每次同步 = 拉远端 → 合并进本库 → 把合并后的全量（超集）传回 → 收敛
+import { invoke } from "@tauri-apps/api/core";
 import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { BaseDirectory } from "@tauri-apps/plugin-fs";
-import { fetch } from "@tauri-apps/plugin-http";
 import { getSetting, setSetting } from "./db";
 import { collectBackup, mergeIntoLocal, type Backup } from "./sync";
 
@@ -29,16 +29,25 @@ export async function clearGhToken(): Promise<void> {
   await writeTextFile(".immerso-gh-token", "", { baseDir: BaseDirectory.Home });
 }
 
+/**
+ * GitHub API 请求：走 Rust 侧 gist_http 命令（reqwest 直连，连接 15s / 总 120s 超时）。
+ * 大备份经 plugin-http 会变成字节数组 JSON 过 WebView IPC，慢到撑爆前端超时，
+ * 还会「服务端已建 Gist、前端却取消」——id 丢失，每次重试都新建孤儿 Gist。
+ * 返回轻量 Response 形状（ok/status/json/text），调用处无感。
+ */
 async function gh(url: string, token: string, init?: { method?: string; body?: string }) {
-  return fetch(url, {
-    method: init?.method,
-    body: init?.body,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/vnd.github+json",
-      "Content-Type": "application/json",
-    },
+  const [status, text] = await invoke<[number, string]>("gist_http", {
+    method: init?.method ?? "GET",
+    url,
+    token,
+    body: init?.body ?? null,
   });
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: () => Promise.resolve(JSON.parse(text) as unknown),
+    text: () => Promise.resolve(text),
+  };
 }
 
 /** 读取 Gist 内容；处理 GitHub API 对 >1MB 文件的截断（转抓 raw_url） */

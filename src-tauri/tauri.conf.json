@@ -10,6 +10,7 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "title": "浸词",
@@ -29,7 +30,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": "all",
     "resources": ["resources/dict.db"],
     "icon": [
       "icons/32x32.png",

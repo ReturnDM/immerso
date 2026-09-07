@@ -112,7 +112,7 @@ fn show_quick(_app: &tauri::AppHandle, w: &tauri::WebviewWindow) {
 }
 
 fn build_quick(app: &tauri::AppHandle) {
-    let mut builder = tauri::WebviewWindowBuilder::new(
+    let builder = tauri::WebviewWindowBuilder::new(
         app,
         "quick",
         tauri::WebviewUrl::App("index.html".into()),
@@ -125,11 +125,9 @@ fn build_quick(app: &tauri::AppHandle) {
     .resizable(false)
     .shadow(false)
     .center();
-    // transparent() 在 macOS 需 macos-private-api 特性，不开；Mac 上小窗为不透明方角
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
-    {
-        builder = builder.transparent(true);
-    }
+    // 透明窗体：Windows 直支；macOS 需 macos-private-api 特性（Cargo.toml 已开 +
+    // tauri.conf.json macOSPrivateApi），小窗圆角卡片才不会露白底
+    let builder = builder.transparent(true);
     let _ = builder.build().map(|w| {
         let _ = w.set_focus();
         // webview 还没加载完，不 emit quick-show；QuickCapture 挂载时会自取剪贴板
@@ -210,6 +208,50 @@ async fn capture_selected(app: tauri::AppHandle) -> Result<String, String> {
     .map_err(|e| e.to_string())?
 }
 
+/// 云同步专用 HTTP：body 以原生字符串直达 reqwest。
+/// 不走 plugin-http——大备份会被序列化成字节数组 JSON 过 WebView IPC（体积×4、慢），
+/// 上传慢于前端超时就会「请求取消但服务端已建 Gist」的死循环。
+#[tauri::command]
+async fn gist_http(
+    method: String,
+    url: String,
+    token: String,
+    body: Option<String>,
+) -> Result<(u16, String), String> {
+    if !(url.starts_with("https://api.github.com/")
+        || url.starts_with("https://gist.githubusercontent.com/"))
+    {
+        return Err(format!("不允许的请求地址: {url}"));
+    }
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let mut req = match method.to_uppercase().as_str() {
+        "GET" => client.get(&url),
+        "POST" => client.post(&url),
+        "PATCH" => client.patch(&url),
+        "DELETE" => client.delete(&url),
+        other => return Err(format!("不支持的方法: {other}")),
+    };
+    if let Some(b) = body {
+        req = req.body(b);
+    }
+    let resp = req
+        // GitHub API 强制要求 User-Agent，缺失直接 403
+        .header("User-Agent", "immerso-sync")
+        .header("Authorization", format!("Bearer {token}"))
+        .header("Accept", "application/vnd.github+json")
+        .header("Content-Type", "application/json")
+        .send()
+        .await
+        .map_err(|e| format!("网络请求失败: {e}"))?;
+    let status = resp.status().as_u16();
+    let text = resp.text().await.map_err(|e| format!("读取响应失败: {e}"))?;
+    Ok((status, text))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -229,7 +271,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             set_quick_hotkeys,
             capture_selected,
-            open_quick
+            open_quick,
+            gist_http
         ])
         .setup(|app| {
             // 内置词典释放：安装包带 resources/dict.db 时拷到数据目录（大小不同视为新版覆盖）。
@@ -244,8 +287,11 @@ pub fn run() {
                         let stale = std::fs::metadata(&target).map(|m| m.len()).unwrap_or(0)
                             != std::fs::metadata(&res).map(|m| m.len()).unwrap_or(1);
                         if stale {
-                            if let Err(e) = std::fs::copy(&res, &target) {
-                                eprintln!("内置词典释放失败: {e}");
+                            // macOS/全新机器：数据目录首启时还不存在，先建目录再释放
+                            if let Some(parent) = target.parent() {
+                                if let Err(e) = std::fs::create_dir_all(parent).and_then(|_| std::fs::copy(&res, &target)) {
+                                    eprintln!("内置词典释放失败: {e}");
+                                }
                             }
                         }
                     }

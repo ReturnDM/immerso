@@ -62,6 +62,10 @@ export async function neathSync(): Promise<{ added: number; existing: number }> 
         it.word,
         src.lastInsertId,
       ]);
+      await db.execute("INSERT OR IGNORE INTO deck_words (word, deck) VALUES (?, ?)", [
+        it.word,
+        "生词本",
+      ]);
       added++;
     }
   }

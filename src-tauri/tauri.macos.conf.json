@@ -1,0 +1,17 @@
+{
+  "app": {
+    "windows": [
+      {
+        "title": "浸词",
+        "width": 880,
+        "height": 660,
+        "minWidth": 640,
+        "minHeight": 480,
+        "center": true,
+        "decorations": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
+      }
+    ]
+  }
+}

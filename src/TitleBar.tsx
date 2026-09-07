@@ -1,9 +1,8 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { isMac } from "./lib/platform";
 import { Icon } from "./components/Icon";
 
 const appWindow = getCurrentWindow();
-// macOS 用系统红绿灯（titleBarStyle: Overlay），只有 Windows 需要自绘控制键
-const isMac = /Macintosh|Mac/.test(navigator.userAgent);
 
 /** 无边框窗口顶部：拖拽区 +（Windows）窗口控制 */
 export default function TitleBar() {

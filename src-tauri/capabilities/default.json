@@ -20,11 +20,18 @@
     "dialog:default",
     {
       "identifier": "fs:allow-read-text-file",
-      "allow": [{ "path": "**" }]
+      "allow": [
+        { "path": "**" },
+        { "path": "$HOME/.neath-api-key" },
+        { "path": "$HOME/.immerso-gh-token" }
+      ]
     },
     {
       "identifier": "fs:allow-write-text-file",
-      "allow": [{ "path": "**" }]
+      "allow": [
+        { "path": "**" },
+        { "path": "$HOME/.immerso-gh-token" }
+      ]
     },
     {
       "identifier": "http:default",

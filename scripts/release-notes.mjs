@@ -25,7 +25,7 @@ const body = [
   lines.slice(start + 1, end).join("\n").trim(),
   "",
   "---",
-  "Windows 下载 `-setup.exe` 安装；macOS 下载 `.dmg`（通用二进制，未签名：右键 → 打开，或执行 `xattr -cr \"/Applications/浸词.app\"`）。",
+  "Windows 下载 `-setup.exe` 安装；macOS 下载 `.dmg`（通用二进制，未签名：右键 → 打开，或执行 `xattr -cr \"/Applications/immerso.app\"`）。",
 ].join("\n");
 
 // 多行输出写进 GITHUB_OUTPUT（heredoc 语法），release.yml 里用 steps.notes.outputs.body 引用

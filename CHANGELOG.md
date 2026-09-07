@@ -2,14 +2,24 @@
 
 每个 `v*` 标签发布时，GitHub Release 的说明取自这里对应版本段落（`scripts/release-notes.mjs` 提取）。
 
-## v0.13.1 - 2026-09-07
+## v0.13.2 - 2026-09-07
 
-### 变更
-- **同步格式升级 v2：词书多标签上云**。一词多书的全部归属（deck_words）随备份一起上云，合并时按并集补齐本机缺失的标签、不删已有归属；v1 旧备份照常读写。此前云端只存每张卡的主词书列，换设备会丢掉一词多书的其余标签。
-- 删除卡片时一并清理其词书标签，不再留下悬空归属。
+### 修复（macOS 兼容专项）
+- **主窗口没有红绿灯**：`decorations: false` 在 macOS 上是彻底无边框（连系统红绿灯一起没了），而自绘控制键又只在 Windows 渲染——Mac 用户此前只能靠菜单 Cmd+Q 关闭。新增 `tauri.macos.conf.json` 平台配置，macOS 改为 `decorations: true` + `titleBarStyle: Overlay` + `hiddenTitle`，红绿灯叠在内容上层，外观不变。
+- **首次启动词典释放失败**：内置词典释放在 Rust setup 里直接 `fs::copy`，macOS 全新机器上数据目录还不存在，拷贝报 "No such file or directory"，查词/词形还原全废。现在先建目录再释放。
+- **Mac 本地无法构建安装包**：`bundle.targets` 写死 `["nsis"]`（仅 Windows），本地 `tauri build` 在 macOS 上出不了 dmg；改为 `all`（CI 的 `--bundles` 显式参数不受影响）。
+- 修复 macOS 下 `build_quick` 的 `unused_mut` 编译警告（transparent 平台门化后 mut 未使用）。
 
-### 修复
-- 云同步的 Gist 被删除后，推送遇 404 会自动重建新 Gist 并重指，不再永久报错。
+### 修复（Mac 体验跟进）
+- **热键文案两端分开**：设置页热键选项此前统一显示「Alt+E / Alt+Q」，macOS 上实际是 ⌥ Option 键。抽出 `lib/platform.ts`，Mac 显示「⌥ E（Option）/ ⌥ Q（Option）/ ⌃⇧ 空格」，Windows 仍显示 Alt/Ctrl；存储的热键值全端一致，不受影响。
+- **快速收词小窗白底**：macOS 上小窗此前退化为不透明（怕引 macos-private-api），深色圆角卡片外露出一圈白色窗体背景。现在开启 `macos-private-api` 特性 + `macOSPrivateApi` 配置，macOS 小窗同样透明，圆角卡片干净浮在桌面上，与 Windows 表现一致。
+- **设置页数据路径写死 Windows 格式**：底部版权行在 macOS 上也显示 `%APPDATA%\com.returndm.immerso`，改为按平台显示（Mac 为 `~/Library/Application Support/com.returndm.immerso`）。
+- **匿词同步误报 forbidden path**：fs 权限范围补上 `$HOME/.neath-api-key` 显式条目，此前 `**` 通配不覆盖主目录点文件，未配置 Key 时设置页常驻一条 ✗ 报错。
+
+### 修复（云同步卡死）
+- **Gist Token 从未保存成功（卡同步的根因）**：Token 存 `~/.immerso-gh-token`，但 fs 权限 `**` 通配在 macOS 上不匹配主目录点文件，写入被静默拒绝；保存按钮又没有 try/catch，失败零反馈——看起来配置了，实际同步永远找不到 Token。权限补上 `$HOME/.immerso-gh-token` 显式条目，保存/清除按钮加上错误提示。
+- **同步请求移到 Rust 侧（reqwest 直连），连接 15s / 总 120s 超时**：此前走 plugin-http，大备份（约 1MB JSON）会被序列化成 3 倍体积的字节数组过 WebView IPC，直连 GitHub 慢速上传时前端超时先触发——出现「服务端已建 Gist、前端却报错」的死循环：gist id 永远存不下来，每次重试都新建一个孤儿 Gist。现备份以原生字符串直达 reqwest；GitHub API 强制要求的 User-Agent 头也已补上（缺失会被 403 拒绝）。
+- **匿词收的词没有词书标签**：匿词同步写卡时未维护 `deck_words`，词书列表看不到匿词收的词；已随写卡补上映射（主同步链路的同等问题已在 v0.13.1 处理）。
 
 ## v0.13.0 - 2026-09-07
 

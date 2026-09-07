@@ -17,11 +17,13 @@ import { exportData, importData } from "../lib/sync";
 import { clearGhToken, cloudSync, getGhToken, lastCloudSyncText, saveGhToken } from "../lib/cloud";
 import { Icon } from "../components/Icon";
 
-/** 热键统一选项（macOS 上 Alt=⌥ Option，Ctrl=Control） */
+import { isMac } from "../lib/platform";
+
+/** 热键统一选项：值全端一致（alt 在 macOS 即 ⌥ Option），文案按平台分开显示 */
 const HOTKEY_OPTIONS: { v: string; label: string }[] = [
-  { v: "alt+e", label: "Alt+E" },
-  { v: "alt+q", label: "Alt+Q" },
-  { v: "ctrl+shift+space", label: "Ctrl+⇧空格" },
+  { v: "alt+e", label: isMac ? "⌥ E（Option）" : "Alt+E" },
+  { v: "alt+q", label: isMac ? "⌥ Q（Option）" : "Alt+Q" },
+  { v: "ctrl+shift+space", label: isMac ? "⌃⇧ 空格" : "Ctrl+⇧空格" },
   { v: "", label: "关闭" },
 ];
 
@@ -344,7 +346,11 @@ export default function Settings({ onBack }: { onBack: () => void }) {
               <>
                 <span className="text-xs accent-text">✓ 已配置（{ghToken.slice(0, 6)}…）</span>
                 <button
-                  onClick={() => void clearGhToken().then(() => setGhToken(null))}
+                  onClick={() =>
+                    void clearGhToken()
+                      .then(() => setGhToken(null))
+                      .catch((e) => setCloudMsg(`✗ 清除 Token 失败：${String(e)}`))
+                  }
                   className="text-xs t4 hover:text-rose-400 transition-colors"
                 >
                   清除
@@ -363,9 +369,14 @@ export default function Settings({ onBack }: { onBack: () => void }) {
                 <button
                   onClick={async () => {
                     if (!tokenInput.trim()) return;
-                    await saveGhToken(tokenInput);
-                    setGhToken(tokenInput.trim());
-                    setTokenInput("");
+                    try {
+                      await saveGhToken(tokenInput);
+                      setGhToken(tokenInput.trim());
+                      setTokenInput("");
+                      setCloudMsg(null);
+                    } catch (e) {
+                      setCloudMsg(`✗ 保存 Token 失败：${String(e)}`);
+                    }
                   }}
                   className="text-xs t3 hover:text-[var(--text)] transition-colors flex-none"
                 >
@@ -450,7 +461,8 @@ export default function Settings({ onBack }: { onBack: () => void }) {
         </Section>
 
         <p className="text-[11px] t4 text-center pt-6 border-t border-[var(--border)] mt-2">
-          词典 ECDICT · 调度 FSRS-5 · 数据 %APPDATA%\com.returndm.immerso
+          词典 ECDICT · 调度 FSRS-5 · 数据{" "}
+          {isMac ? "~/Library/Application Support/com.returndm.immerso" : "%APPDATA%\\com.returndm.immerso"}
         </p>
       </div>
     </div>
