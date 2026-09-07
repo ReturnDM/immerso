@@ -120,7 +120,7 @@ export default function Stats({ onBack }: { onBack: () => void }) {
         <button onClick={onBack} className="link-strong text-sm">
           ← 首页
         </button>
-        <span className="mx-auto text-sm tracking-widest t2 select-none">统 计</span>
+        <span className="word-serif mx-auto text-[15px] tracking-widest t2 select-none">统 计</span>
         <span className="w-10" />
       </div>
 

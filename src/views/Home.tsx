@@ -68,7 +68,16 @@ export default function Home({ onStart, onSearch, onSettings, onStats, onLibrary
   const pickerOptions = [{ name: "全部", total: stats?.library }, ...deckList];
 
   return (
-    <div className="min-h-screen flex flex-col items-center px-8 py-9">
+    <div className="relative isolate min-h-screen flex flex-col items-center px-8 py-9 overflow-hidden">
+      {/* 巨幅「浸」字水印：宣纸上的底纹，纯静态层次 */}
+      {total > 0 && (
+        <span
+          aria-hidden
+          className="word-serif pointer-events-none select-none absolute -z-10 left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-[21rem] leading-none t1 opacity-[0.045]"
+        >
+          浸
+        </span>
+      )}
       <div className="w-full max-w-2xl self-center flex items-center text-[13px] pt-1.5 tracking-wide">
         <button onClick={onSettings} className="link">设置</button>
         <span className="t4 px-1">·</span>

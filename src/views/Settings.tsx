@@ -232,7 +232,7 @@ export default function Settings({ onBack }: { onBack: () => void }) {
         <button onClick={onBack} className="link-strong text-sm inline-flex items-center gap-1.5">
           ← 首页
         </button>
-        <span className="mx-auto text-sm tracking-[0.3em] t2 select-none">设置</span>
+        <span className="word-serif mx-auto text-[15px] tracking-[0.3em] t2 select-none">设置</span>
         <span className="w-10" />
       </div>
 

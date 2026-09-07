@@ -98,7 +98,8 @@
 }
 
 :root {
-  font-family: -apple-system, "SF Pro Text", "PingFang SC", "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  font-family: -apple-system, "SF Pro Text", "PingFang SC", "Segoe UI", "Microsoft YaHei UI",
+    "Microsoft YaHei", system-ui, sans-serif;
 }
 
 /* 滚动条：常驻占位（防止视图切换时出现/消失导致内容横移）+ 细样式 */
@@ -176,15 +177,41 @@ body {
   background: transparent !important;
 }
 
-/* 单词展示：字典衬线 */
+/* 单词展示：字典衬线。中文依次回落 macOS 华文宋 → 思源宋 → 华文中宋 → 宋体，
+   让中英混排的展示文字在 Windows 上同样有墨感 */
 .word-serif {
-  font-family: Georgia, "Times New Roman", "Palatino", "Songti SC", "Noto Serif SC", "Source Han Serif SC", serif;
+  font-family: Georgia, "Times New Roman", "Palatino", "Songti SC", "Source Han Serif SC",
+    "Noto Serif SC", "STZhongsong", "SimSun", serif;
 }
 
 /* 数字与间隔：等宽仪表 */
 .num {
   font-family: "SF Mono", "Cascadia Mono", Consolas, Menlo, monospace;
   font-variant-numeric: tabular-nums;
+}
+
+/* 选区：淡青瓷，别用系统蓝 */
+::selection {
+  background: var(--accent-dim);
+}
+
+/* 宣纸纹理：全屏固定噪点，纯材质层（不接事件、不随滚动重绘）。
+   快速收词小窗是透明窗体，噪点会把窗体轮廓涂出来，必须关闭 */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+  opacity: 0.03;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='280' height='280'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='280' height='280' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 280px 280px;
+}
+html[data-theme="dark"] body::after {
+  opacity: 0.045;
+}
+body.quick-transparent::after {
+  display: none;
 }
 
 @layer components {

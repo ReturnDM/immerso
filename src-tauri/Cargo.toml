@@ -1,6 +1,6 @@
 [package]
 name = "immerso"
-version = "0.14.3"
+version = "0.15.0"
 description = "浸词 - 桌面背单词"
 authors = ["ReturnDM"]
 edition = "2021"

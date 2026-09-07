@@ -146,7 +146,7 @@ export default function Library({ onBack }: { onBack: () => void }) {
         <button onClick={onBack} className="link-strong text-sm">
           ← 首页
         </button>
-        <span className="mx-auto text-sm tracking-[0.3em] t2 select-none">词库</span>
+        <span className="word-serif mx-auto text-[15px] tracking-[0.3em] t2 select-none">词库</span>
         <span className="w-10" />
       </div>
 
