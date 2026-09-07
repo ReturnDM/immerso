@@ -531,7 +531,13 @@ export default function Review({ onExit }: { onExit: () => void }) {
                   {item!.sourceContext}
                 </blockquote>
               )}
-              <p className="mt-12 text-xs t4 animate-pulse">空格 · 认识它了，开始练习</p>
+              <button
+                onClick={() => setTaughtId(item!.id)}
+                className="btn-ink rounded-md px-8 py-2.5 text-sm mt-12"
+              >
+                开始练习
+                <span className="opacity-50 text-xs ml-2 num">空格</span>
+              </button>
             </div>
           ) : effMode === "self" ? (
             <div
@@ -711,9 +717,16 @@ export default function Review({ onExit }: { onExit: () => void }) {
       {/* 评分区 / 提交区 */}
       <div className="pb-9 px-6">
         {typing && phase === "ask" ? (
-          <p className="text-center text-xs t4">
-            在上方输入拼写，回车提交
-          </p>
+          <div className="mx-auto max-w-xs">
+            <button
+              onClick={submitTyping}
+              disabled={!answer.trim()}
+              className="btn-ink w-full rounded-md px-2 py-3 text-sm disabled:opacity-40"
+            >
+              提交
+              <span className="opacity-50 text-xs ml-2 num">Enter</span>
+            </button>
+          </div>
         ) : isLast && phase === "right" && autoGrade.current !== null ? (
           <div className="mx-auto max-w-xs">
             <button
