@@ -74,7 +74,7 @@ export async function cloudSync(): Promise<string> {
   let gistId = await getSetting("cloud_gist_id");
   let remote: Backup | null = null;
   if (gistId) {
-    remote = await fetchGist(token, gistId); // 404 → null，下次重建
+    remote = await fetchGist(token, gistId); // 404 → null，靠推送段的死 id 重建
   }
 
   let report = "";
@@ -90,8 +90,13 @@ export async function cloudSync(): Promise<string> {
   });
   if (gistId) {
     const res = await gh(`${API}/gists/${gistId}`, token, { method: "PATCH", body });
-    if (!res.ok) throw new Error(`更新 Gist 失败 ${res.status}`);
-  } else {
+    if (res.status === 404) {
+      gistId = null; // 远端已被删除或失效 → 转为重建新 Gist
+    } else if (!res.ok) {
+      throw new Error(`更新 Gist 失败 ${res.status}`);
+    }
+  }
+  if (!gistId) {
     const res = await gh(`${API}/gists`, token, { method: "POST", body });
     if (!res.ok) throw new Error(`创建 Gist 失败 ${res.status}（检查 Token 是否有 gist 权限）`);
     const j = (await res.json()) as { id: string };
