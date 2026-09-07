@@ -375,7 +375,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
         }
         return;
       }
-      // 最后一个模式的评分：数字键；self 模式 Enter = 良好
+      // 最后一个模式的评分：数字键；self 模式翻面后 空格/回车 = 良好
       if (revealed && isLast) {
         if (["1", "2", "3", "4"].includes(e.key)) {
           const g = GRADE_ORDER[Number(e.key) - 1];
@@ -384,7 +384,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
           void grade(g);
           return;
         }
-        if (phase === "ask" && effMode === "self" && e.key === "Enter") {
+        if (phase === "ask" && effMode === "self" && (e.key === "Enter" || e.key === " ")) {
           e.preventDefault();
           void grade(Rating.Good);
         }
@@ -401,7 +401,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
         return;
       }
       if (effMode === "scramble" && !revealed) return; // 拼句纯点击，不接空格翻面
-      if (e.key === " " && !revealed) {
+      if ((e.key === " " || e.key === "Enter") && !revealed) {
         e.preventDefault();
         flip();
       }
@@ -536,7 +536,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
                 className="btn-ink rounded-md px-8 py-2.5 text-sm mt-12"
               >
                 开始练习
-                <span className="opacity-50 text-xs ml-2 num">空格</span>
+                <span className="opacity-50 text-xs ml-2 num">空格 / Enter</span>
               </button>
             </div>
           ) : effMode === "self" ? (
@@ -559,7 +559,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
               >
                 <Icon name="speaker" size={15} />
               </button>
-              <p className="mt-16 text-xs t4 animate-pulse">空格 翻面</p>
+              <p className="mt-16 text-xs t4 animate-pulse">空格 / 回车 翻面</p>
             </div>
           ) : typing ? (
             <div key={seqKey} className="text-center w-full max-w-xl animate-card-in">
@@ -734,7 +734,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
               className="btn-ink w-full rounded-md px-2 py-3 text-sm"
             >
               继续 · 评「{GRADE_LABEL[autoGrade.current]}」
-              <span className="opacity-50 text-xs ml-2 num">Enter</span>
+              <span className="opacity-50 text-xs ml-2 num">空格 / Enter</span>
             </button>
           </div>
         ) : revealed && !isLast ? (
@@ -743,8 +743,8 @@ export default function Review({ onExit }: { onExit: () => void }) {
               onClick={advanceMode}
               className="btn-ink w-full rounded-md px-2 py-3 text-sm"
             >
-              下一个模式
-              <span className="opacity-50 text-xs ml-2 num">Enter</span>
+              下一个
+              <span className="opacity-50 text-xs ml-2 num">空格 / Enter</span>
             </button>
           </div>
         ) : revealed && intervals ? (
