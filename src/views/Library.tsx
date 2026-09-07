@@ -14,6 +14,7 @@ import {
   type LibCard,
   type LibFilter,
 } from "../lib/db";
+import { fetchCatalog, importBook, type CatalogBook } from "../lib/books";
 import { stateLabel } from "../lib/fsrs";
 
 export default function Library({ onBack }: { onBack: () => void }) {
@@ -31,6 +32,10 @@ export default function Library({ onBack }: { onBack: () => void }) {
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [catalogOpen, setCatalogOpen] = useState(false);
+  const [catalog, setCatalog] = useState<CatalogBook[] | null>(null);
+  const [importing, setImporting] = useState<string | null>(null);
+  const [importMsg, setImportMsg] = useState<string | null>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
   /** 追加一页；page 0 = 重置列表（筛选条件变化时走这里） */
@@ -107,6 +112,25 @@ export default function Library({ onBack }: { onBack: () => void }) {
     reloadDecks();
   };
 
+  const openCatalog = () => {
+    setCatalogOpen(true);
+    setImportMsg(null);
+    if (catalog === null) void fetchCatalog().then(setCatalog).catch((e) => setImportMsg(String(e)));
+  };
+
+  const doImport = async (b: CatalogBook) => {
+    setImporting(b.id);
+    setImportMsg(null);
+    try {
+      setImportMsg(await importBook(b));
+      reloadDecks();
+    } catch (e) {
+      setImportMsg(`导入失败：${String(e)}`);
+    } finally {
+      setImporting(null);
+    }
+  };
+
   const rowAction = (c: LibCard) => {
     if (confirmId === c.id) {
       return (
@@ -147,7 +171,9 @@ export default function Library({ onBack }: { onBack: () => void }) {
           ← 首页
         </button>
         <span className="word-serif mx-auto text-[15px] tracking-[0.3em] t2 select-none">词库</span>
-        <span className="w-10" />
+        <button onClick={openCatalog} className="link-strong text-sm">
+          + 词书
+        </button>
       </div>
 
       {/* 词书页签 */}
@@ -292,6 +318,60 @@ export default function Library({ onBack }: { onBack: () => void }) {
           </p>
         )}
       </div>
+
+      {/* 词书目录：内置内容包，一键导入 */}
+      {catalogOpen && (
+        <div
+          className="fixed inset-0 z-40 flex items-center justify-center p-6"
+          onClick={() => setCatalogOpen(false)}
+        >
+          <div className="absolute inset-0 bg-black/25 animate-fade-in" />
+          <div
+            className="relative w-full max-w-md max-h-[82vh] overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--bg)] p-5 animate-view-in"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center">
+              <span className="word-serif text-[15px] tracking-[0.2em] t1">词书目录</span>
+              <button onClick={() => setCatalogOpen(false)} className="ml-auto link text-sm">
+                关闭
+              </button>
+            </div>
+            <p className="mt-1 text-[11px] t4">内置内容包，按需导入；词与学习数据照常云同步</p>
+            <div className="mt-3">
+              {catalog === null && <p className="py-6 text-center text-xs t4">载入中…</p>}
+              {catalog?.map((b) => {
+                const imported = allNames.includes(b.name);
+                return (
+                  <div key={b.id} className="py-3 border-t border-[var(--border)] flex items-center gap-4">
+                    <div className="min-w-0">
+                      <p className="text-sm t1">
+                        {b.name}
+                        <span className="num text-[11px] t4 ml-1.5">{b.count}</span>
+                      </p>
+                      <p className="text-[11px] t3 truncate">{b.desc}</p>
+                    </div>
+                    <div className="ml-auto flex-none text-xs">
+                      {imported ? (
+                        <span className="t4">已导入</span>
+                      ) : importing === b.id ? (
+                        <span className="accent-text">导入中…</span>
+                      ) : (
+                        <button
+                          onClick={() => void doImport(b)}
+                          className="accent-text hairline pt-0.5 hover:opacity-80 transition-opacity"
+                        >
+                          导入
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {importMsg && <p className="mt-3 accent-text text-xs">{importMsg}</p>}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

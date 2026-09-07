@@ -1,0 +1,58 @@
+[
+  {
+    "id": "cet4",
+    "name": "四级",
+    "desc": "大学英语四级考试词汇",
+    "file": "cet4.json",
+    "count": 3847
+  },
+  {
+    "id": "cet6",
+    "name": "六级",
+    "desc": "大学英语六级考试词汇",
+    "file": "cet6.json",
+    "count": 5406
+  },
+  {
+    "id": "ky",
+    "name": "考研",
+    "desc": "考研英语核心词汇",
+    "file": "ky.json",
+    "count": 4798
+  },
+  {
+    "id": "toefl",
+    "name": "托福",
+    "desc": "TOEFL 核心词汇",
+    "file": "toefl.json",
+    "count": 6968
+  },
+  {
+    "id": "ielts",
+    "name": "雅思",
+    "desc": "IELTS 核心词汇",
+    "file": "ielts.json",
+    "count": 5034
+  },
+  {
+    "id": "gre",
+    "name": "GRE",
+    "desc": "GRE 核心词汇",
+    "file": "gre.json",
+    "count": 7503
+  },
+  {
+    "id": "awl",
+    "name": "学术词汇",
+    "desc": "Academic Word List · 570 词族，论文与文献高频词",
+    "file": "awl.json",
+    "count": 3069
+  },
+  {
+    "id": "cs",
+    "name": "计算机",
+    "desc": "Computer Science Word List · 读文档与论文的学术词",
+    "file": "cs.json",
+    "count": 451
+  }
+]
