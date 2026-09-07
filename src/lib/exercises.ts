@@ -30,24 +30,24 @@ export function parseModes(s: string | null): ExMode[] {
 export const serializeModes = (modes: ExMode[]): string => modes.join(",");
 
 /**
- * 为一张卡挑练习：新词不进默写/听写；没有可用的就回落自评。
- * cloze/scramble 依赖收词原句，hasContext=false 时自动排除。
+ * 为一张卡生成练习序列：设置里勾选的所有模式按固定顺序各过一遍，全部完成才算学会。
+ * - 新词：跳过默写/听写（先认识后练）
+ * - cloze/scramble 依赖收词原句，无原句时自动排除
+ * - 四选一需要队列里至少 4 个词才能凑出干扰项
  */
-export function pickMode(
+export function buildSequence(
   modes: ExMode[],
   isNew: boolean,
   reps: number,
   hasContext: boolean,
-): ExMode {
-  const eligible = modes.filter((m) => {
-    if (!isNew) return true;
-    return NEW_WORD_MODES.includes(m);
-  });
-  const usable = eligible.filter((m) => {
+  poolSize: number,
+): ExMode[] {
+  const seq = modes.filter((m) => {
+    if (isNew && !NEW_WORD_MODES.includes(m)) return false;
     if ((m === "dictation" || m === "listen") && isNew && reps === 0) return false;
     if ((m === "cloze" || m === "scramble") && !hasContext) return false;
+    if ((m === "choice_en" || m === "choice_zh") && poolSize < 4) return false;
     return true;
   });
-  const pool = usable.length > 0 ? usable : ["self" as ExMode];
-  return pool[Math.floor(Math.random() * pool.length)];
+  return seq.length > 0 ? seq : ["self" as ExMode];
 }

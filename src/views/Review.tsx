@@ -10,7 +10,7 @@ import {
 } from "../lib/db";
 import { previewOptions, speak, stateLabel } from "../lib/fsrs";
 import { maybeAutoSync } from "../lib/cloud";
-import { pickMode, type ExMode } from "../lib/exercises";
+import { buildSequence, EX_MODES, type ExMode } from "../lib/exercises";
 import { Icon } from "../components/Icon";
 
 // ECDICT 的 translation 用字面 "\n" 分隔多条释义
@@ -136,6 +136,8 @@ export default function Review({ onExit }: { onExit: () => void }) {
   const [total, setTotal] = useState(0);
   const [wrongIds, setWrongIds] = useState<Map<number, QueueItem>>(new Map());
   const [retryCount, setRetryCount] = useState(0);
+  /** 每张卡的练习序列：勾选的所有模式按顺序各过一遍，最后一个作答完才评分 */
+  const seqRef = useRef<Map<number, { left: ExMode[]; pos: number; total: number }>>(new Map());
   const autoSpeak = useRef(false);
   const schedulingRef = useRef<Record<Grade, RecordLogItem> | null>(null);
   const autoGrade = useRef<Grade | null>(null);
@@ -161,10 +163,21 @@ export default function Review({ onExit }: { onExit: () => void }) {
   }, []);
 
   const item = queue?.[idx];
-  const mode: ExMode = useMemo(() => {
-    if (!item || !modes) return "self";
-    return pickMode(modes, item.isNew, item.card.reps, !!item.sourceContext);
-  }, [item, modes]);
+  // 模式序列：惰性构建，跨模式切换时只动 left/pos；重试卡（Again 接回）重建全新序列
+  const seqState = useMemo(() => {
+    if (!item || !modes) return null;
+    let s = seqRef.current.get(item.id);
+    if (!s) {
+      const seq = buildSequence(modes, item.isNew, item.card.reps, !!item.sourceContext, queue?.length ?? 0);
+      s = { left: seq, pos: 0, total: seq.length };
+      seqRef.current.set(item.id, s);
+    }
+    return s;
+  }, [item, modes, queue]);
+  const mode: ExMode = seqState?.left[0] ?? "self";
+  /** 当前是否是序列最后一个模式：是才进入评分，否则「下一个模式」 */
+  const isLast = !seqState || seqState.left.length <= 1;
+  const seqKey = item && seqState ? `${item.id}-${seqState.pos}` : "";
 
   // 四选一的干扰项从同队列其他卡生成；不够四个就回落自评
   const choice = useMemo(() => {
@@ -211,6 +224,22 @@ export default function Review({ onExit }: { onExit: () => void }) {
     reveal();
   }, [reveal]);
 
+  /** 完成当前模式，进入序列下一个模式（最后一个模式由评分流程接管） */
+  const advanceMode = useCallback(() => {
+    if (!item) return;
+    const s = seqRef.current.get(item.id);
+    if (!s) return;
+    s.left.shift();
+    s.pos += 1;
+    setRevealed(false);
+    setIntervals(null);
+    setAnswer("");
+    setPhase("ask");
+    setPick(null);
+    autoGrade.current = null;
+    shownAt.current = Date.now();
+  }, [item]);
+
   const grade = useCallback(
     async (g: Grade, presched?: RecordLogItem) => {
       if (!item || !revealed) return;
@@ -222,9 +251,10 @@ export default function Review({ onExit }: { onExit: () => void }) {
         setBug(String(e));
         return;
       }
-      // 忘记 → 本轮内重现：携带最新 FSRS 状态，隔 3~5 张后换个方式再考
+      // 忘记 → 本轮内重现：携带最新 FSRS 状态，隔 3~5 张后整条模式序列重来
       if (g === Rating.Again) {
         const retryItem = { ...item, card: sched.card };
+        seqRef.current.delete(item.id); // 重试卡重新生成完整序列
         setQueue((q) => {
           if (!q) return q;
           const at = Math.min(idx + 3 + Math.floor(Math.random() * 3), q.length);
@@ -272,6 +302,8 @@ export default function Review({ onExit }: { onExit: () => void }) {
       setPhase("wrong");
       autoGrade.current = null;
     }
+    // 提交后失焦：让后续 Enter/Space 落到全局键盘处理（下一模式或评分）
+    (document.activeElement as HTMLElement | null)?.blur?.();
   }, [item, phase, answer]);
 
   const pickChoice = useCallback(
@@ -327,15 +359,24 @@ export default function Review({ onExit }: { onExit: () => void }) {
         return;
       }
       if (typing && phase === "ask") return; // 输入框自己处理回车
-      if (phase === "right" && autoGrade.current !== null) {
+      // 最后一个模式：答对 → 一键评「良好」
+      if (isLast && phase === "right" && autoGrade.current !== null) {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           void grade(autoGrade.current);
         }
         return;
       }
-      // 翻面/作答后的评分：数字键；self 模式 Enter = 良好
-      if (revealed) {
+      // 非最后一个模式：作答/翻面后回车进入下一个模式
+      if (revealed && !isLast) {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          advanceMode();
+        }
+        return;
+      }
+      // 最后一个模式的评分：数字键；self 模式 Enter = 良好
+      if (revealed && isLast) {
         if (["1", "2", "3", "4"].includes(e.key)) {
           const g = GRADE_ORDER[Number(e.key) - 1];
           if (phase === "wrong" && g === Rating.Easy) return;
@@ -367,7 +408,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [item, revealed, phase, typing, mode, choice, teaching, flip, grade, pickChoice, onExit]);
+  }, [item, revealed, phase, typing, mode, choice, teaching, flip, grade, pickChoice, onExit, advanceMode, isLast]);
 
   if (queue === null || modes === null) {
     return (
@@ -403,6 +444,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
           <button
             onClick={() => {
               const items = shuffle([...wrongList]);
+              seqRef.current.clear(); // 重练的每张卡重新生成完整模式序列
               setQueue(items);
               setTotal(items.length);
               setDoneIds(new Set());
@@ -453,6 +495,12 @@ export default function Review({ onExit }: { onExit: () => void }) {
         <div className="waterline mt-2.5 mx-6">
           <i style={{ width: `${Math.round(progress * 100)}%` }} />
         </div>
+        {!teaching && seqState && (
+          <p className="text-center text-[11px] t4 mt-2">
+            模式 {Math.min(seqState.pos + 1, seqState.total)} / {seqState.total} ·{" "}
+            {EX_MODES.find((m) => m.id === mode)?.label}
+          </p>
+        )}
       </div>
 
       {/* 出题区 */}
@@ -487,7 +535,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
             </div>
           ) : effMode === "self" ? (
             <div
-              key={item!.id}
+              key={seqKey}
               className="text-center cursor-pointer animate-card-in w-full"
               onClick={flip}
             >
@@ -508,7 +556,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
               <p className="mt-16 text-xs t4 animate-pulse">空格 翻面</p>
             </div>
           ) : typing ? (
-            <div key={item!.id} className="text-center w-full max-w-xl animate-card-in">
+            <div key={seqKey} className="text-center w-full max-w-xl animate-card-in">
               <p className="text-xs t4 tracking-[0.3em]">
                 {effMode === "listen" ? "听 写" : effMode === "cloze" ? "填 空" : "默 写"}
               </p>
@@ -545,7 +593,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
               )}
               <input
                 autoFocus
-                key={item!.id}
+                key={seqKey}
                 value={answer}
                 onChange={(e) => setAnswer(e.target.value)}
                 onKeyDown={(e) => {
@@ -565,13 +613,13 @@ export default function Review({ onExit }: { onExit: () => void }) {
               </p>
             </div>
           ) : effMode === "scramble" ? (
-            <div key={item!.id} className="w-full max-w-xl animate-card-in">
+            <div key={seqKey} className="w-full max-w-xl animate-card-in">
               <p className="text-center text-xs t4 tracking-[0.3em] mb-7">组 词 成 句</p>
               <p className="text-center text-sm t3 mb-6">{firstLine(item!.dict?.translation)}</p>
               <Scramble sentence={item!.sourceContext ?? ""} onResult={answerScramble} />
             </div>
           ) : (
-            <div key={item!.id} className="text-center w-full max-w-lg animate-card-in">
+            <div key={seqKey} className="text-center w-full max-w-lg animate-card-in">
               {effMode === "choice_en" ? (
                 <>
                   <div className="word-serif text-6xl t1">{item!.word}</div>
@@ -617,7 +665,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
           )
         ) : (
           /* 揭晓 */
-          <div key={`r${item!.id}`} className="text-center max-w-xl w-full animate-card-in">
+          <div key={`r${seqKey}`} className="text-center max-w-xl w-full animate-card-in">
             {phase === "right" && typing && <p className="mb-4 accent-text text-sm">✓ 正确</p>}
             {phase === "right" && (effMode === "choice_en" || effMode === "choice_zh") && (
               <p className="mb-4 accent-text text-sm">✓ 答对了</p>
@@ -666,13 +714,23 @@ export default function Review({ onExit }: { onExit: () => void }) {
           <p className="text-center text-xs t4">
             在上方输入拼写，回车提交
           </p>
-        ) : phase === "right" && autoGrade.current !== null ? (
+        ) : isLast && phase === "right" && autoGrade.current !== null ? (
           <div className="mx-auto max-w-xs">
             <button
               onClick={() => autoGrade.current !== null && void grade(autoGrade.current)}
               className="btn-ink w-full rounded-md px-2 py-3 text-sm"
             >
               继续 · 评「{GRADE_LABEL[autoGrade.current]}」
+              <span className="opacity-50 text-xs ml-2 num">Enter</span>
+            </button>
+          </div>
+        ) : revealed && !isLast ? (
+          <div className="mx-auto max-w-xs">
+            <button
+              onClick={advanceMode}
+              className="btn-ink w-full rounded-md px-2 py-3 text-sm"
+            >
+              下一个模式
               <span className="opacity-50 text-xs ml-2 num">Enter</span>
             </button>
           </div>
