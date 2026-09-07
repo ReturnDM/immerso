@@ -392,7 +392,11 @@ export async function setCardSuspended(id: number, suspended: boolean): Promise<
 
 export async function deleteCard(id: number): Promise<void> {
   const db = await getApp();
+  const row = (
+    await db.select<{ word: string }[]>("SELECT word FROM cards WHERE id = ?", [id])
+  )[0];
   await db.execute("DELETE FROM reviews WHERE card_id = ?", [id]);
+  if (row) await db.execute("DELETE FROM deck_words WHERE word = ? COLLATE NOCASE", [row.word]);
   await db.execute("UPDATE cards SET source_id = NULL WHERE id = ? AND source_id IS NOT NULL", [id]);
   await db.execute("DELETE FROM sources WHERE id NOT IN (SELECT source_id FROM cards WHERE source_id IS NOT NULL)");
   await db.execute("DELETE FROM cards WHERE id = ?", [id]);

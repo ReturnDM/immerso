@@ -33,12 +33,19 @@ export interface BackupReview {
   duration_ms: number | null;
 }
 
+export interface BackupDeckWord {
+  word: string;
+  deck: string;
+}
+
 export interface Backup {
   app: "immerso";
   version: number;
   exported_at: string;
   cards: BackupCard[];
   reviews: BackupReview[];
+  /** v2：词书多标签（deck_words 多对多），v1 备份无此字段 */
+  deck_words?: BackupDeckWord[];
 }
 
 /** 收集本机全部数据为备份结构 */
@@ -54,12 +61,14 @@ export async function collectBackup(): Promise<Backup> {
     `SELECT c.word, r.reviewed_at, r.rating, r.state, r.stability, r.difficulty, r.due, r.duration_ms
      FROM reviews r JOIN cards c ON c.id = r.card_id`,
   );
+  const deck_words = await db.select<BackupDeckWord[]>("SELECT word, deck FROM deck_words");
   return {
     app: "immerso",
-    version: 1,
+    version: 2,
     exported_at: new Date().toISOString(),
     cards,
     reviews,
+    deck_words,
   };
 }
 
@@ -126,6 +135,11 @@ export async function mergeIntoLocal(data: Backup): Promise<string> {
       if (sourceId !== null) {
         await db.execute("UPDATE cards SET source_id = ? WHERE word = ? COLLATE NOCASE", [sourceId, c.word]);
       }
+      // 保证新卡的 deck 列在 deck_words 里有归属
+      await db.execute("INSERT OR IGNORE INTO deck_words (word, deck) VALUES (?, ?)", [
+        c.word,
+        c.deck || "生词本",
+      ]);
       addedCards++;
     } else {
       // 双端都学过：last_review 新者胜；一致则不动
@@ -162,7 +176,28 @@ export async function mergeIntoLocal(data: Backup): Promise<string> {
     }
   }
 
+  // v2：补齐本机缺失的词书多标签（只增不删，归属合并取并集）
+  let addedTags = 0;
+  if (Array.isArray(data.deck_words)) {
+    const have = new Set(
+      (
+        await db.select<{ w: string; d: string }[]>("SELECT word AS w, deck AS d FROM deck_words")
+      ).map((x) => `${x.w.toLowerCase()}|${x.d}`),
+    );
+    const known = new Set(
+      (await db.select<{ w: string }[]>("SELECT word AS w FROM cards")).map((x) => x.w.toLowerCase()),
+    );
+    for (const t of data.deck_words) {
+      const key = `${t.word.toLowerCase()}|${t.deck}`;
+      if (have.has(key) || !known.has(t.word.toLowerCase())) continue;
+      await db.execute("INSERT OR IGNORE INTO deck_words (word, deck) VALUES (?, ?)", [t.word, t.deck]);
+      have.add(key);
+      addedTags++;
+    }
+  }
+
   const parts = [`新增 ${addedCards} 卡`, `更新 ${updatedCards} 卡`, `补记 ${addedReviews} 条`];
+  if (addedTags > 0) parts.push(`补标签 ${addedTags} 个`);
   if (keptCards > 0) parts.push(`本机较新保留 ${keptCards} 卡`);
   return parts.join(" · ");
 }
