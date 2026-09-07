@@ -136,8 +136,8 @@ export default function Review({ onExit }: { onExit: () => void }) {
   const [total, setTotal] = useState(0);
   const [wrongIds, setWrongIds] = useState<Map<number, QueueItem>>(new Map());
   const [retryCount, setRetryCount] = useState(0);
-  /** 每张卡的练习序列：勾选的所有模式按顺序各过一遍，最后一个作答完才评分 */
-  const seqRef = useRef<Map<number, { left: ExMode[]; pos: number; total: number }>>(new Map());
+  /** 每张卡的练习序列：勾选的所有模式按顺序各过一遍，最后一个作答完才评分；评分前可在序列内前后移动 */
+  const seqRef = useRef<Map<number, { seq: ExMode[]; pos: number }>>(new Map());
   const autoSpeak = useRef(false);
   const schedulingRef = useRef<Record<Grade, RecordLogItem> | null>(null);
   const autoGrade = useRef<Grade | null>(null);
@@ -163,20 +163,20 @@ export default function Review({ onExit }: { onExit: () => void }) {
   }, []);
 
   const item = queue?.[idx];
-  // 模式序列：惰性构建，跨模式切换时只动 left/pos；重试卡（Again 接回）重建全新序列
+  // 模式序列：惰性构建；重试卡（Again 接回）重建全新序列
   const seqState = useMemo(() => {
     if (!item || !modes) return null;
     let s = seqRef.current.get(item.id);
     if (!s) {
       const seq = buildSequence(modes, item.isNew, item.card.reps, !!item.sourceContext, queue?.length ?? 0);
-      s = { left: seq, pos: 0, total: seq.length };
+      s = { seq, pos: 0 };
       seqRef.current.set(item.id, s);
     }
     return s;
   }, [item, modes, queue]);
-  const mode: ExMode = seqState?.left[0] ?? "self";
-  /** 当前是否是序列最后一个模式：是才进入评分，否则「下一个模式」 */
-  const isLast = !seqState || seqState.left.length <= 1;
+  const mode: ExMode = seqState ? seqState.seq[seqState.pos] ?? "self" : "self";
+  /** 当前是否是序列最后一个模式：是才进入评分，否则「下一个」 */
+  const isLast = !seqState || seqState.pos >= seqState.seq.length - 1;
   const seqKey = item && seqState ? `${item.id}-${seqState.pos}` : "";
 
   // 四选一的干扰项从同队列其他卡生成；不够四个就回落自评
@@ -228,9 +228,23 @@ export default function Review({ onExit }: { onExit: () => void }) {
   const advanceMode = useCallback(() => {
     if (!item) return;
     const s = seqRef.current.get(item.id);
-    if (!s) return;
-    s.left.shift();
+    if (!s || s.pos >= s.seq.length - 1) return;
     s.pos += 1;
+    setRevealed(false);
+    setIntervals(null);
+    setAnswer("");
+    setPhase("ask");
+    setPick(null);
+    autoGrade.current = null;
+    shownAt.current = Date.now();
+  }, [item]);
+
+  /** 退回当前词的上一模式再看一遍；该词一旦评分进入下一词即不可回退 */
+  const prevMode = useCallback(() => {
+    if (!item) return;
+    const s = seqRef.current.get(item.id);
+    if (!s || s.pos === 0) return;
+    s.pos -= 1;
     setRevealed(false);
     setIntervals(null);
     setAnswer("");
@@ -359,6 +373,12 @@ export default function Review({ onExit }: { onExit: () => void }) {
         return;
       }
       if (typing && phase === "ask") return; // 输入框自己处理回车
+      // 该词未评分时：退格/左方向键退回上一模式
+      if (phase === "ask" && seqState && seqState.pos > 0 && (e.key === "Backspace" || e.key === "ArrowLeft")) {
+        e.preventDefault();
+        prevMode();
+        return;
+      }
       // 最后一个模式：答对 → 一键评「良好」
       if (isLast && phase === "right" && autoGrade.current !== null) {
         if (e.key === "Enter" || e.key === " ") {
@@ -408,7 +428,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [item, revealed, phase, typing, mode, choice, teaching, flip, grade, pickChoice, onExit, advanceMode, isLast]);
+  }, [item, revealed, phase, typing, mode, choice, teaching, flip, grade, pickChoice, onExit, advanceMode, prevMode, isLast, seqState]);
 
   if (queue === null || modes === null) {
     return (
@@ -497,7 +517,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
         </div>
         {!teaching && seqState && (
           <p className="text-center text-[11px] t4 mt-2">
-            模式 {Math.min(seqState.pos + 1, seqState.total)} / {seqState.total} ·{" "}
+            模式 {Math.min(seqState.pos + 1, seqState.seq.length)} / {seqState.seq.length} ·{" "}
             {EX_MODES.find((m) => m.id === mode)?.label}
           </p>
         )}
@@ -738,10 +758,17 @@ export default function Review({ onExit }: { onExit: () => void }) {
             </button>
           </div>
         ) : revealed && !isLast ? (
-          <div className="mx-auto max-w-xs">
+          <div className="mx-auto max-w-md w-full grid grid-cols-2 gap-2">
+            <button
+              onClick={prevMode}
+              disabled={!seqState || seqState.pos === 0}
+              className="rounded-md px-2 py-3 text-sm t3 border border-[var(--border)] hover:text-[var(--text)] hover:border-[var(--t3)] disabled:opacity-30 transition-colors"
+            >
+              上一个
+            </button>
             <button
               onClick={advanceMode}
-              className="btn-ink w-full rounded-md px-2 py-3 text-sm"
+              className="btn-ink rounded-md px-2 py-3 text-sm"
             >
               下一个
               <span className="opacity-50 text-xs ml-2 num">空格 / Enter</span>

@@ -12,7 +12,7 @@ import { getSetting } from "./lib/db";
 import { directCapture, notify } from "./lib/capture";
 
 type View = "home" | "search" | "review" | "settings" | "stats" | "library";
-/** 转场方向：fwd 前进（去往子页）、back 返回（回首页）、dive 进入复习 */
+/** 转场方向（按入口位置）：fwd = 从右侧滑入（查词在右上）、back = 从左侧滑入（设置/统计/词库在左上）、dive = 进入复习下潜 */
 type Dir = "fwd" | "back" | "dive";
 const DIR_CLASS: Record<Dir, string> = {
   fwd: "animate-view-fwd",
@@ -66,16 +66,16 @@ export default function App() {
       <div key={view} className={DIR_CLASS[nav.dir]}>
         {view === "search" && <Search onBack={() => go("home", "back")} />}
         {view === "review" && <Review onExit={() => go("home", "back")} />}
-        {view === "settings" && <Settings onBack={() => go("home", "back")} />}
-        {view === "stats" && <Stats onBack={() => go("home", "back")} />}
-        {view === "library" && <Library onBack={() => go("home", "back")} />}
+        {view === "settings" && <Settings onBack={() => go("home", "fwd")} />}
+        {view === "stats" && <Stats onBack={() => go("home", "fwd")} />}
+        {view === "library" && <Library onBack={() => go("home", "fwd")} />}
         {view === "home" && (
           <Home
             onStart={() => go("review", "dive")}
             onSearch={() => go("search", "fwd")}
-            onSettings={() => go("settings", "fwd")}
-            onStats={() => go("stats", "fwd")}
-            onLibrary={() => go("library", "fwd")}
+            onSettings={() => go("settings", "back")}
+            onStats={() => go("stats", "back")}
+            onLibrary={() => go("library", "back")}
           />
         )}
       </div>
