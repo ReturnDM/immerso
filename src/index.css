@@ -177,11 +177,20 @@ body {
   background: transparent !important;
 }
 
-/* 单词展示：字典衬线。中文依次回落 macOS 华文宋 → 思源宋 → 华文中宋 → 宋体，
-   让中英混排的展示文字在 Windows 上同样有墨感 */
+/* 内置思源宋体（Noto Serif SC，SIL OFL，随应用分发）：
+   Windows 没有可用的系统中文衬线，展示层的中文全靠这一份字体 */
+@font-face {
+  font-family: "Noto Serif SC Bundled";
+  src: url("./assets/fonts/NotoSerifSC-var.ttf") format("truetype");
+  font-weight: 200 900;
+  font-display: swap;
+}
+
+/* 单词展示：字典衬线。英文走 Georgia，中文回落内置思源宋体，
+   没有 Georgia 的系统再依次回落 macOS 华文宋 → 思源宋 → 华文中宋 → 宋体 */
 .word-serif {
-  font-family: Georgia, "Times New Roman", "Palatino", "Songti SC", "Source Han Serif SC",
-    "Noto Serif SC", "STZhongsong", "SimSun", serif;
+  font-family: Georgia, "Times New Roman", "Palatino", "Noto Serif SC Bundled", "Songti SC",
+    "Source Han Serif SC", "Noto Serif SC", "STZhongsong", "SimSun", serif;
 }
 
 /* 数字与间隔：等宽仪表 */

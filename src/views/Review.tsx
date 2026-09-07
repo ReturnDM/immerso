@@ -21,7 +21,7 @@ function Translation({ text }: { text: string }) {
   return (
     <>
       {text.split("\\n").map((line, i) => (
-        <p key={i} className="m-0 leading-relaxed">
+        <p key={i} className="word-serif m-0 leading-relaxed">
           {line}
         </p>
       ))}
@@ -596,10 +596,10 @@ export default function Review({ onExit }: { onExit: () => void }) {
                       原句里没有该词原形，按释义直接默写
                     </p>
                   )}
-                  <p className="mt-3 text-sm t3">{firstLine(item!.dict?.translation)}</p>
+                  <p className="word-serif mt-3 text-sm t3">{firstLine(item!.dict?.translation)}</p>
                 </>
               ) : effMode === "dictation" ? (
-                <div className="mt-6 text-lg t1 leading-relaxed">
+                <div className="word-serif mt-6 text-lg t1 leading-relaxed">
                   <Translation text={item!.dict?.translation ?? "（词典缺释义）"} />
                 </div>
               ) : (
@@ -641,7 +641,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
           ) : effMode === "scramble" ? (
             <div key={seqKey} className="w-full max-w-xl animate-card-in">
               <p className="text-center text-xs t4 tracking-[0.3em] mb-7">组 词 成 句</p>
-              <p className="text-center text-sm t3 mb-6">{firstLine(item!.dict?.translation)}</p>
+              <p className="word-serif text-center text-sm t3 mb-6">{firstLine(item!.dict?.translation)}</p>
               <Scramble sentence={item!.sourceContext ?? ""} onResult={answerScramble} />
             </div>
           ) : (
