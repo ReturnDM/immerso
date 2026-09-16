@@ -29,9 +29,20 @@ export function parseModes(s: string | null): ExMode[] {
 
 export const serializeModes = (modes: ExMode[]): string => modes.join(",");
 
+/** Fisher-Yates 洗牌（返回新数组） */
+function shuffled<T>(a: readonly T[]): T[] {
+  const r = [...a];
+  for (let i = r.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [r[i], r[j]] = [r[j], r[i]];
+  }
+  return r;
+}
+
 /**
- * 为一张卡生成练习序列：设置里勾选的所有模式按固定顺序各过一遍，全部完成才算学会。
- * - 新词：跳过默写/听写（先认识后练）
+ * 为一张卡生成练习序列：设置里勾选的所有模式各过一遍，全部完成才算学会。
+ * - 新词：跳过默写/听写（先认识后练），self 固定在首位（教学卡会消化它）
+ * - 顺序随机洗牌（新词 self 除外）：各词的轮次顺序彼此错开，同一种模式不会成串出现
  * - cloze/scramble 依赖收词原句，无原句时自动排除
  * - 四选一需要队列里至少 4 个词才能凑出干扰项
  */
@@ -49,7 +60,9 @@ export function buildSequence(
     if ((m === "choice_en" || m === "choice_zh") && poolSize < 4) return false;
     return true;
   });
-  return seq.length > 0 ? seq : ["self" as ExMode];
+  if (seq.length === 0) return ["self" as ExMode];
+  const head = isNew && seq[0] === "self" ? 1 : 0;
+  return [...seq.slice(0, head), ...shuffled(seq.slice(head))];
 }
 
 /**

@@ -163,7 +163,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
   }, []);
 
   const item = queue?.[idx];
-  // 模式序列：插回的续练卡以 resume 断点为准，其余惰性构建；重试卡（Again 接回）重建全新序列
+  // 模式序列：插回的续练卡（含忘记重试）以 resume 断点为准，其余惰性构建
   const seqState = useMemo(() => {
     if (!item || !modes) return null;
     let s = item.resume ?? seqRef.current.get(item.id);
@@ -285,10 +285,14 @@ export default function Review({ onExit }: { onExit: () => void }) {
         setBug(String(e));
         return;
       }
-      // 忘记 → 本轮内重现：携带最新 FSRS 状态，隔 3~5 张后整条模式序列重来
+      // 忘记 → 本轮内重现：只重做失败的最后一轮（已过的模式不再重来），隔 3~5 张
       if (g === Rating.Again) {
-        const retryItem = { ...item, card: sched.card, resume: undefined };
-        seqRef.current.delete(item.id); // 重试卡重新生成完整序列
+        const s = seqRef.current.get(item.id);
+        const retryItem = {
+          ...item,
+          card: sched.card,
+          resume: s ? { seq: s.seq, pos: s.pos, errors: 0 } : undefined,
+        };
         setQueue((q) => {
           if (!q) return q;
           const at = Math.min(idx + 3 + Math.floor(Math.random() * 3), q.length);
