@@ -10,7 +10,7 @@ import {
 } from "../lib/db";
 import { previewOptions, speak, stateLabel } from "../lib/fsrs";
 import { maybeAutoSync } from "../lib/cloud";
-import { buildSequence, EX_MODES, type ExMode } from "../lib/exercises";
+import { buildSequence, deferGap, EX_MODES, type ExMode } from "../lib/exercises";
 import { Icon } from "../components/Icon";
 
 // ECDICT 的 translation 用字面 "\n" 分隔多条释义
@@ -136,7 +136,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
   const [total, setTotal] = useState(0);
   const [wrongIds, setWrongIds] = useState<Map<number, QueueItem>>(new Map());
   const [retryCount, setRetryCount] = useState(0);
-  /** 每张卡的练习序列：勾选的所有模式按顺序各过一遍，最后一个作答完才评分；评分前可在序列内前后移动 */
+  /** 每张卡的练习序列：勾选的所有模式按顺序各过一遍；间隔式练习把各轮拆开插回队列，最后一轮作答完才评分 */
   const seqRef = useRef<Map<number, { seq: ExMode[]; pos: number }>>(new Map());
   const autoSpeak = useRef(false);
   const schedulingRef = useRef<Record<Grade, RecordLogItem> | null>(null);
@@ -163,20 +163,22 @@ export default function Review({ onExit }: { onExit: () => void }) {
   }, []);
 
   const item = queue?.[idx];
-  // 模式序列：惰性构建；重试卡（Again 接回）重建全新序列
+  // 模式序列：插回的续练卡以 resume 断点为准，其余惰性构建；重试卡（Again 接回）重建全新序列
   const seqState = useMemo(() => {
     if (!item || !modes) return null;
-    let s = seqRef.current.get(item.id);
+    let s = item.resume ?? seqRef.current.get(item.id);
     if (!s) {
       const seq = buildSequence(modes, item.isNew, item.card.reps, !!item.sourceContext, queue?.length ?? 0);
       s = { seq, pos: 0 };
-      seqRef.current.set(item.id, s);
     }
+    seqRef.current.set(item.id, s);
     return s;
   }, [item, modes, queue]);
   const mode: ExMode = seqState ? seqState.seq[seqState.pos] ?? "self" : "self";
-  /** 当前是否是序列最后一个模式：是才进入评分，否则「下一个」 */
+  /** 当前是否是序列最后一个模式：是才进入评分，否则做完这轮就过、隔卡回来 */
   const isLast = !seqState || seqState.pos >= seqState.seq.length - 1;
+  /** 之前轮次累计的答错次数（随断点传递） */
+  const errors = item?.resume?.errors ?? 0;
   const seqKey = item && seqState ? `${item.id}-${seqState.pos}` : "";
 
   // 四选一的干扰项从同队列其他卡生成；不够四个就回落自评
@@ -224,12 +226,8 @@ export default function Review({ onExit }: { onExit: () => void }) {
     reveal();
   }, [reveal]);
 
-  /** 完成当前模式，进入序列下一个模式（最后一个模式由评分流程接管） */
-  const advanceMode = useCallback(() => {
-    if (!item) return;
-    const s = seqRef.current.get(item.id);
-    if (!s || s.pos >= s.seq.length - 1) return;
-    s.pos += 1;
+  /** 复原出题区状态（推进、插队共用） */
+  const resetPrompt = useCallback(() => {
     setRevealed(false);
     setIntervals(null);
     setAnswer("");
@@ -237,22 +235,44 @@ export default function Review({ onExit }: { onExit: () => void }) {
     setPick(null);
     autoGrade.current = null;
     shownAt.current = Date.now();
-  }, [item]);
+  }, []);
 
-  /** 退回当前词的上一模式再看一遍；该词一旦评分进入下一词即不可回退 */
-  const prevMode = useCallback(() => {
+  /**
+   * 间隔式练习核心：过完当前轮后，把该词剩余轮次（seq 的 from 位起）带着断点插回队列，
+   * 隔几张卡再回来，自己推进到下一张卡；wrong=true 时隔 2 张尽快回来。
+   * 返回 false 表示 from 已越过最后一轮（此时交由评分流程或旧的翻面流程接管）。
+   */
+  const deferFrom = useCallback(
+    (from: number, wrong: boolean): boolean => {
+      if (!item) return false;
+      const s = seqRef.current.get(item.id);
+      if (!s || from >= s.seq.length) return false;
+      const cont: QueueItem = {
+        ...item,
+        resume: { seq: s.seq, pos: from, errors: (item.resume?.errors ?? 0) + (wrong ? 1 : 0) },
+      };
+      const gap = deferGap(Math.max(from - 1, 0), wrong);
+      setQueue((q) => {
+        if (!q) return q;
+        const next = [...q];
+        next.splice(Math.min(idx + 1 + gap, next.length), 0, cont);
+        return next;
+      });
+      setIdx(idx + 1);
+      resetPrompt();
+      return true;
+    },
+    [item, idx, resetPrompt],
+  );
+
+  /** 新词教学卡「开始练习」：教学本身就是第一轮「看」——消化序列里的 self（若有），其余轮次隔卡回来 */
+  const teachNext = useCallback(() => {
     if (!item) return;
+    setTaughtId(item.id);
     const s = seqRef.current.get(item.id);
-    if (!s || s.pos === 0) return;
-    s.pos -= 1;
-    setRevealed(false);
-    setIntervals(null);
-    setAnswer("");
-    setPhase("ask");
-    setPick(null);
-    autoGrade.current = null;
-    shownAt.current = Date.now();
-  }, [item]);
+    deferFrom(s && s.seq[0] === "self" ? 1 : 0, false);
+    // 序列只剩 self 时 deferFrom 无事可做，自然落回旧的 self 翻面自评流程
+  }, [item, deferFrom]);
 
   const grade = useCallback(
     async (g: Grade, presched?: RecordLogItem) => {
@@ -267,7 +287,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
       }
       // 忘记 → 本轮内重现：携带最新 FSRS 状态，隔 3~5 张后整条模式序列重来
       if (g === Rating.Again) {
-        const retryItem = { ...item, card: sched.card };
+        const retryItem = { ...item, card: sched.card, resume: undefined };
         seqRef.current.delete(item.id); // 重试卡重新生成完整序列
         setQueue((q) => {
           if (!q) return q;
@@ -290,16 +310,10 @@ export default function Review({ onExit }: { onExit: () => void }) {
       if (idx + 1 >= queue!.length && g !== Rating.Again) setQueue([]);
       else {
         setIdx(idx + 1);
-        setRevealed(false);
-        setIntervals(null);
-        setAnswer("");
-        setPhase("ask");
-        setPick(null);
-        autoGrade.current = null;
-        shownAt.current = Date.now();
+        resetPrompt();
       }
     },
-    [item, revealed, idx, queue],
+    [item, revealed, idx, queue, resetPrompt],
   );
 
   const submitTyping = useCallback(() => {
@@ -316,7 +330,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
       setPhase("wrong");
       autoGrade.current = null;
     }
-    // 提交后失焦：让后续 Enter/Space 落到全局键盘处理（下一模式或评分）
+    // 提交后失焦：让后续 Enter/Space 落到全局键盘处理（下一张卡或评分）
     (document.activeElement as HTMLElement | null)?.blur?.();
   }, [item, phase, answer]);
 
@@ -368,30 +382,24 @@ export default function Review({ onExit }: { onExit: () => void }) {
       if (teaching) {
         if (e.key === " " || e.key === "Enter") {
           e.preventDefault();
-          setTaughtId(item.id);
+          teachNext();
         }
         return;
       }
       if (typing && phase === "ask") return; // 输入框自己处理回车
-      // 该词未评分时：退格/左方向键退回上一模式
-      if (phase === "ask" && seqState && seqState.pos > 0 && (e.key === "Backspace" || e.key === "ArrowLeft")) {
-        e.preventDefault();
-        prevMode();
-        return;
-      }
-      // 最后一个模式：答对 → 一键评「良好」
-      if (isLast && phase === "right" && autoGrade.current !== null) {
+      // 最后一个模式且前几轮无错：答对 → 一键评「良好」
+      if (isLast && phase === "right" && autoGrade.current !== null && errors === 0) {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           void grade(autoGrade.current);
         }
         return;
       }
-      // 非最后一个模式：作答/翻面后回车进入下一个模式
+      // 非最后一个模式：作答/翻面看完就过，下一轮隔卡回来
       if (revealed && !isLast) {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          advanceMode();
+          if (seqState) deferFrom(seqState.pos + 1, phase === "wrong");
         }
         return;
       }
@@ -399,7 +407,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
       if (revealed && isLast) {
         if (["1", "2", "3", "4"].includes(e.key)) {
           const g = GRADE_ORDER[Number(e.key) - 1];
-          if (phase === "wrong" && g === Rating.Easy) return;
+          if ((phase === "wrong" || errors > 0) && g === Rating.Easy) return;
           e.preventDefault();
           void grade(g);
           return;
@@ -428,7 +436,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [item, revealed, phase, typing, mode, choice, teaching, flip, grade, pickChoice, onExit, advanceMode, prevMode, isLast, seqState]);
+  }, [item, revealed, phase, typing, mode, choice, teaching, errors, flip, grade, pickChoice, onExit, deferFrom, teachNext, isLast, seqState]);
 
   if (queue === null || modes === null) {
     return (
@@ -505,7 +513,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
             <Icon name="close" size={16} />
           </button>
           <span className="mx-auto num text-[13px] t2">
-            {idx + 1} / {queue.length}
+            {doneIds.size} / {total} 词
           </span>
           <span className="t3 text-[13px]">
             {item!.isNew ? "新词" : stateLabel(item!.card.state)}
@@ -517,8 +525,8 @@ export default function Review({ onExit }: { onExit: () => void }) {
         </div>
         {!teaching && seqState && (
           <p className="text-center text-[11px] t4 mt-2">
-            模式 {Math.min(seqState.pos + 1, seqState.seq.length)} / {seqState.seq.length} ·{" "}
-            {EX_MODES.find((m) => m.id === mode)?.label}
+            {seqState.pos > 0 ? "回顾 · " : ""}模式 {Math.min(seqState.pos + 1, seqState.seq.length)} /{" "}
+            {seqState.seq.length} · {EX_MODES.find((m) => m.id === mode)?.label}
           </p>
         )}
       </div>
@@ -552,7 +560,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
                 </blockquote>
               )}
               <button
-                onClick={() => setTaughtId(item!.id)}
+                onClick={teachNext}
                 className="btn-ink rounded-md px-8 py-2.5 text-sm mt-12"
               >
                 开始练习
@@ -747,7 +755,7 @@ export default function Review({ onExit }: { onExit: () => void }) {
               <span className="opacity-50 text-xs ml-2 num">Enter</span>
             </button>
           </div>
-        ) : isLast && phase === "right" && autoGrade.current !== null ? (
+        ) : isLast && phase === "right" && autoGrade.current !== null && errors === 0 ? (
           <div className="mx-auto max-w-xs">
             <button
               onClick={() => autoGrade.current !== null && void grade(autoGrade.current)}
@@ -758,26 +766,22 @@ export default function Review({ onExit }: { onExit: () => void }) {
             </button>
           </div>
         ) : revealed && !isLast ? (
-          <div className="mx-auto max-w-md w-full grid grid-cols-2 gap-2">
+          <div className="mx-auto max-w-xs">
             <button
-              onClick={prevMode}
-              disabled={!seqState || seqState.pos === 0}
-              className="rounded-md px-2 py-3 text-sm t3 border border-[var(--border)] hover:text-[var(--text)] hover:border-[var(--t3)] disabled:opacity-30 transition-colors"
+              onClick={() => seqState && deferFrom(seqState.pos + 1, phase === "wrong")}
+              className="btn-ink rounded-md px-2 py-3 text-sm w-full"
             >
-              上一个
-            </button>
-            <button
-              onClick={advanceMode}
-              className="btn-ink rounded-md px-2 py-3 text-sm"
-            >
-              下一个
+              继续 · 稍后回顾
               <span className="opacity-50 text-xs ml-2 num">空格 / Enter</span>
             </button>
+            <p className="mt-3 text-center text-[11px] t4">
+              {phase === "wrong" ? "这轮没过，稍后马上回来" : `「${item!.word}」的下一轮稍后回来`}
+            </p>
           </div>
         ) : revealed && intervals ? (
           <div className="mx-auto max-w-xl grid grid-cols-4 gap-2 animate-fade-in">
             {GRADE_ORDER.map((g, i) => {
-              if (phase === "wrong" && g === Rating.Easy) return null;
+              if ((phase === "wrong" || errors > 0) && g === Rating.Easy) return null;
               return (
                 <button
                   key={g}

@@ -19,6 +19,8 @@ export interface DictEntry {
   definition: string;
   pos: string;
   exchange: string;
+  /** 查词命中方式：lookup() 填写，其他来源无此字段 */
+  hit?: "exact" | "prefix" | "contains";
 }
 
 interface CardRow {
@@ -44,6 +46,8 @@ export interface QueueItem {
   card: Card;
   sourceContext: string | null;
   dict: DictEntry | null;
+  /** 间隔式练习的断点：带着它插回队列，轮到时从 seq[pos] 续练 */
+  resume?: { seq: ExMode[]; pos: number; errors: number };
 }
 
 /** 本地日期的零点，用 ISO（UTC）字符串与库里的 ISO 时间比较 */
@@ -123,18 +127,46 @@ function deckClause(deck: string): { sql: string; params: string[] } {
 
 // ---------- 词典 ----------
 
+const normWord = (s: string) => s.trim().toLowerCase();
+
+/**
+ * 查词：前缀联想。精确命中置顶（不独占），其余按常用度（词频 → 牛津/柯林斯 → 词长）排序，
+ * 打两三个字母就能看到 apple 这类常用词；前缀候选太少时补「包含」匹配兜底。
+ */
 export async function lookup(q: string): Promise<DictEntry[]> {
   const db = await getDict();
   const cols = "word, phonetic, translation, definition, pos, exchange";
-  const exact = await db.select<DictEntry[]>(
-    `SELECT ${cols} FROM dict WHERE word = ? COLLATE NOCASE LIMIT 1`,
-    [q],
+  const norm = q.trim().toLowerCase();
+  // 无词频的排最后；牛津/柯林斯词表次之（用大数与词频域隔开）
+  const freqOrd =
+    "CASE WHEN frq > 0 THEN frq WHEN oxford > 0 THEN 90000 WHEN collins > 0 THEN 95000 ELSE 999999 END";
+  const rows = await db.select<DictEntry[]>(
+    `SELECT ${cols} FROM dict
+     WHERE word LIKE ? ${norm.length === 1 ? "AND frq > 0" : ""}
+     ORDER BY CASE WHEN word = ? COLLATE NOCASE THEN 0 ELSE 1 END,
+              ${freqOrd}, LENGTH(word), word
+     LIMIT 30`,
+    [q + "%", q],
   );
-  if (exact.length > 0) return exact;
-  return db.select<DictEntry[]>(
-    `SELECT ${cols} FROM dict WHERE word LIKE ? LIMIT 20`,
-    [q + "%"],
-  );
+  for (const r of rows) r.hit = normWord(r.word) === norm ? "exact" : "prefix";
+  // 兜底「包含」匹配限常用词：LIKE '%q%' 走不了索引，全表扫描仅在候选少时触发
+  if (rows.length < 8 && norm.length >= 3) {
+    const seen = new Set(rows.map((r) => normWord(r.word)));
+    const extra = await db.select<DictEntry[]>(
+      `SELECT ${cols} FROM dict
+       WHERE word LIKE '%' || ? || '%' AND word NOT LIKE ?
+         AND (frq > 0 OR oxford > 0 OR collins > 0)
+       ORDER BY ${freqOrd}, LENGTH(word), word
+       LIMIT 12`,
+      [q, q + "%"],
+    );
+    for (const r of extra) {
+      if (seen.has(normWord(r.word))) continue;
+      r.hit = "contains";
+      rows.push(r);
+    }
+  }
+  return rows;
 }
 
 /** 词形还原：变形词 → 词基（lemma 表，未命中返回 null） */

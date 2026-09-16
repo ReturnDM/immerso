@@ -256,7 +256,7 @@ export default function Settings({ onBack }: { onBack: () => void }) {
           </OptionRow>
         </Section>
 
-        <Section title="练习方式" desc="每个单词会把勾选的方式各过一遍，全部完成才记成绩">
+        <Section title="练习方式" desc="每个单词的练习会拆成几轮，隔着其他词交替进行；全部轮次做完才记成绩">
           <div className="divide-y divide-[var(--border)]">
             {EX_MODES.map((m) => (
               <Check

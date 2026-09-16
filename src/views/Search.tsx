@@ -36,6 +36,7 @@ export default function Search({ onBack }: { onBack: () => void }) {
   const [deck, setDeck] = useState("生词本");
   const [decks, setDecks] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
+  const reqRef = useRef(0);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -56,13 +57,17 @@ export default function Search({ onBack }: { onBack: () => void }) {
       return;
     }
     const t = setTimeout(() => {
+      const id = ++reqRef.current;
       lookup(q)
         .then((rows) => {
+          if (id !== reqRef.current) return; // 旧响应晚到，丢弃
           setEntries(rows);
           setError(rows.length === 0 ? `词典里没有「${q}」` : null);
         })
-        .catch((e) => setError(String(e)));
-    }, 200);
+        .catch((e) => {
+          if (id === reqRef.current) setError(String(e));
+        });
+    }, 100);
     return () => clearTimeout(t);
   }, [query]);
 
@@ -80,6 +85,7 @@ export default function Search({ onBack }: { onBack: () => void }) {
   };
 
   const done = (word: string) => ["added", "exists"].includes(added[word] ?? "idle");
+  const containsFrom = entries ? entries.findIndex((x) => x.hit === "contains") : -1;
   const addLabel = (word: string): string =>
     ({ idle: "加入", adding: "…", added: "已收入", exists: "已在库" })[added[word] ?? "idle"];
 
@@ -101,10 +107,13 @@ export default function Search({ onBack }: { onBack: () => void }) {
       {error && <p className="mt-8 text-sm t3">{error}</p>}
 
       <div className="mt-6 w-full max-w-xl">
-        {entries?.map((e) => {
+        {entries?.map((e, i) => {
           const isOpen = open === e.word;
           return (
             <div key={e.word} className="py-4 border-t border-[var(--border)]">
+              {i === containsFrom && (
+                <p className="pb-3 text-xs t4">包含「{query.trim()}」的词</p>
+              )}
               <div
                 className="flex items-baseline gap-3 cursor-pointer -mx-3 px-3 py-1.5 rounded-md
                            hover:bg-[var(--hover)] transition-colors"

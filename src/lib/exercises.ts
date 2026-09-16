@@ -51,3 +51,12 @@ export function buildSequence(
   });
   return seq.length > 0 ? seq : ["self" as ExMode];
 }
+
+/**
+ * 间隔式练习：过完 stage 轮后隔几张卡再回来做下一轮。
+ * 答错隔 2 张尽快巩固；答对随轮次加深逐渐拉开（第 1 轮隔 2~3 张，之后每轮 +2，上限 8）。
+ */
+export function deferGap(stage: number, wrong: boolean): number {
+  if (wrong) return 2;
+  return Math.min(2 + stage * 2, 8) + Math.floor(Math.random() * 2);
+}
