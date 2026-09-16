@@ -219,6 +219,8 @@ export async function addCard(
   deck: string = DEFAULT_DECK,
 ): Promise<"added" | "exists"> {
   const db = await getApp();
+  // 收词即复活：清掉可能的旧删除墓碑
+  await db.execute("DELETE FROM tombstones WHERE word = ? COLLATE NOCASE", [word]);
   const dup = await db.select<{ id: number }[]>(
     "SELECT id FROM cards WHERE word = ? COLLATE NOCASE",
     [word],
@@ -425,9 +427,10 @@ export async function getAllDeckNames(): Promise<string[]> {
   return rows.map((r) => r.deck);
 }
 
-/** 把词加入另一本词书（新词书名即自建） */
+/** 把词加入另一本词书（新词书名即自建）；同样是复活，清掉旧墓碑 */
 export async function addWordToDeck(word: string, deck: string): Promise<void> {
   const db = await getApp();
+  await db.execute("DELETE FROM tombstones WHERE word = ? COLLATE NOCASE", [word]);
   await db.execute("INSERT OR IGNORE INTO deck_words (word, deck) VALUES (?, ?)", [
     word,
     deck.trim(),
@@ -439,16 +442,32 @@ export async function setCardSuspended(id: number, suspended: boolean): Promise<
   await db.execute("UPDATE cards SET suspended = ? WHERE id = ?", [suspended ? 1 : 0, id]);
 }
 
+/** 彻底删除一个词（卡+复习+词书标签+孤儿原句），并留下墓碑——同步合并时据此删词/抑制旧卡回灌 */
 export async function deleteCard(id: number): Promise<void> {
   const db = await getApp();
   const row = (
     await db.select<{ word: string }[]>("SELECT word FROM cards WHERE id = ?", [id])
   )[0];
+  if (!row) return;
   await db.execute("DELETE FROM reviews WHERE card_id = ?", [id]);
-  if (row) await db.execute("DELETE FROM deck_words WHERE word = ? COLLATE NOCASE", [row.word]);
+  await db.execute("DELETE FROM deck_words WHERE word = ? COLLATE NOCASE", [row.word]);
   await db.execute("UPDATE cards SET source_id = NULL WHERE id = ? AND source_id IS NOT NULL", [id]);
   await db.execute("DELETE FROM sources WHERE id NOT IN (SELECT source_id FROM cards WHERE source_id IS NOT NULL)");
   await db.execute("DELETE FROM cards WHERE id = ?", [id]);
+  // deleted_at 与 cards.added_at 同格式（SQLite 本地时间），两者才能直接字典序比较
+  await db.execute(
+    "INSERT INTO tombstones (word, deleted_at) VALUES (?, datetime('now','localtime')) ON CONFLICT(word) DO UPDATE SET deleted_at = excluded.deleted_at",
+    [row.word],
+  );
+}
+
+/** 墓碑表：词 → 删除时间（ISO，可按字典序比较） */
+export async function getTombstones(): Promise<Map<string, string>> {
+  const db = await getApp();
+  const rows = await db.select<{ word: string; deleted_at: string }[]>(
+    "SELECT word, deleted_at FROM tombstones",
+  );
+  return new Map(rows.map((r) => [r.word.toLowerCase(), r.deleted_at]));
 }
 
 /** 给已有卡片补原句（仅在它还没有原句时写入；无 source 则建一条） */

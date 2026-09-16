@@ -1,8 +1,9 @@
 // 数据同步核心：备份收集 + 合并（导入合并与云同步共用）
-// 合并规则：按卡取最新（last_review 新者胜），复习记录按（词,时间,评分）去重补插
+// 合并规则：按卡取最新（last_review 新者胜），复习记录按（词,时间,评分）去重补插；
+// 删除走墓碑（tombstones）：合并时据此删词，并抑制删除之前收的旧卡回灌
 import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { getApp } from "./db";
+import { getApp, getTombstones } from "./db";
 
 export interface BackupCard {
   word: string;
@@ -41,6 +42,8 @@ export interface Backup {
   reviews: BackupReview[];
   /** v2 起：一词多书映射。学习进度挂在词上（cards 一份状态），词书只是标签，可多选 */
   deck_words?: { word: string; deck: string }[];
+  /** 删除墓碑（可选字段，旧端忽略）：合并时据此删词，防止“只增不删”把删掉的词同步回来 */
+  tombstones?: { word: string; deleted_at: string }[];
 }
 
 /** 收集本机全部数据为备份结构 */
@@ -59,6 +62,9 @@ export async function collectBackup(): Promise<Backup> {
   const deck_words = await db.select<{ word: string; deck: string }[]>(
     "SELECT word, deck FROM deck_words",
   );
+  const tombstones = await db.select<{ word: string; deleted_at: string }[]>(
+    "SELECT word, deleted_at FROM tombstones",
+  );
   return {
     app: "immerso",
     version: 2,
@@ -66,11 +72,12 @@ export async function collectBackup(): Promise<Backup> {
     cards,
     reviews,
     deck_words,
+    tombstones,
   };
 }
 
-/** 恢复一词多书映射：v2 备份自带；旧备份（v1）退化为按卡上主词书补标签 */
-async function restoreDeckWords(data: Backup): Promise<void> {
+/** 恢复一词多书映射：v2 备份自带；旧备份（v1）退化为按卡上主词书补标签。墓碑里的词跳过 */
+async function restoreDeckWords(data: Backup, tombstones: Map<string, string>): Promise<void> {
   const db = await getApp();
   const pairs =
     Array.isArray(data.deck_words) && data.deck_words.length > 0
@@ -78,6 +85,7 @@ async function restoreDeckWords(data: Backup): Promise<void> {
       : data.cards.map((c) => ({ word: c.word, deck: c.deck || "生词本" }));
   const seen = new Set<string>();
   const unique = pairs.filter((p) => {
+    if (tombstones.has(p.word.toLowerCase())) return false;
     const k = `${p.word.toLowerCase()}|${p.deck}`;
     if (seen.has(k)) return false;
     seen.add(k);
@@ -103,9 +111,44 @@ async function restoreDeckWords(data: Backup): Promise<void> {
 /** 把远端备份合并进本库，返回人类可读的合并报告 */
 export async function mergeIntoLocal(data: Backup): Promise<string> {
   if (data.app !== "immerso" || !Array.isArray(data.cards)) throw new Error("不是浸词的备份文件");
-  await restoreDeckWords(data);
 
   const db = await getApp();
+
+  // 墓碑：先应用远端删除，再据此抑制旧卡回灌
+  const tombstones = await getTombstones();
+  let deletedWords = 0;
+  for (const t of data.tombstones ?? []) {
+    const key = t.word.toLowerCase();
+    const local = (
+      await db.select<{ id: number; added_at: string | null }[]>(
+        "SELECT id, added_at FROM cards WHERE word = ? COLLATE NOCASE",
+        [t.word],
+      )
+    )[0];
+    // 本机在墓碑之后又重新收了这个词 → 重收优先，旧墓碑作废
+    if (local && (local.added_at ?? "") >= t.deleted_at) continue;
+    if (local) {
+      await db.execute("DELETE FROM reviews WHERE card_id = ?", [local.id]);
+      await db.execute("DELETE FROM deck_words WHERE word = ? COLLATE NOCASE", [t.word]);
+      await db.execute("UPDATE cards SET source_id = NULL WHERE id = ? AND source_id IS NOT NULL", [local.id]);
+      await db.execute("DELETE FROM cards WHERE id = ?", [local.id]);
+      deletedWords++;
+    }
+    if (!tombstones.has(key)) {
+      await db.execute("INSERT OR REPLACE INTO tombstones (word, deleted_at) VALUES (?, ?)", [
+        t.word,
+        t.deleted_at,
+      ]);
+      tombstones.set(key, t.deleted_at);
+    }
+  }
+  if (deletedWords > 0) {
+    await db.execute(
+      "DELETE FROM sources WHERE id NOT IN (SELECT source_id FROM cards WHERE source_id IS NOT NULL)",
+    );
+  }
+
+  await restoreDeckWords(data, tombstones);
   // 复习记录指纹（词,时间,评分）
   const reviewKeys = new Set(
     (
@@ -150,6 +193,14 @@ export async function mergeIntoLocal(data: Backup): Promise<string> {
 
   for (const c of data.cards) {
     const key = c.word.toLowerCase();
+    // 本机删过这个词：删除发生在该卡引入之后 → 同步残留，不回灌
+    const tomb = tombstones.get(key);
+    if (tomb) {
+      if ((c.added_at ?? "") < tomb) continue;
+      // 卡是删除之后重新收的 → 墓碑过期，清掉
+      await db.execute("DELETE FROM tombstones WHERE word = ? COLLATE NOCASE", [c.word]);
+      tombstones.delete(key);
+    }
     const existing = await db.select<
       { id: number; last_review: string | null }[]
     >("SELECT id, last_review FROM cards WHERE word = ? COLLATE NOCASE", [c.word]);
@@ -202,6 +253,7 @@ export async function mergeIntoLocal(data: Backup): Promise<string> {
 
   const parts = [`新增 ${addedCards} 卡`, `更新 ${updatedCards} 卡`, `补记 ${addedReviews} 条`];
   if (keptCards > 0) parts.push(`本机较新保留 ${keptCards} 卡`);
+  if (deletedWords > 0) parts.push(`按删除指令移除 ${deletedWords} 词`);
   return parts.join(" · ");
 }
 

@@ -3,7 +3,6 @@ import { MorphIcon } from "morphicons/react";
 import { Plus, Check } from "lucide";
 import {
   addCard,
-  getCurrentDeck,
   getDecks,
   lookup,
   type DictEntry,
@@ -41,11 +40,10 @@ export default function Search({ onBack }: { onBack: () => void }) {
   useEffect(() => {
     inputRef.current?.focus();
     (async () => {
-      const cur = await getCurrentDeck();
       const names = (await getDecks()).map((d) => d.name);
-      const options = names.length > 0 ? names : ["生词本"];
+      const options = ["生词本", ...names.filter((n) => n !== "生词本")];
       setDecks(options);
-      setDeck(options.includes(cur) ? cur : "生词本");
+      setDeck("生词本");
     })();
   }, []);
 
@@ -78,9 +76,10 @@ export default function Search({ onBack }: { onBack: () => void }) {
     [onBack],
   );
 
-  const add = async (word: string) => {
+  /** 快速收词固定进生词本；展开面板里可选其他词书 */
+  const add = async (word: string, to: string) => {
     setAdded((m) => ({ ...m, [word]: "adding" }));
-    const r = await addCard(word, contexts[word], deck);
+    const r = await addCard(word, contexts[word], to);
     setAdded((m) => ({ ...m, [word]: r === "added" ? "added" : "exists" }));
   };
 
@@ -136,8 +135,9 @@ export default function Search({ onBack }: { onBack: () => void }) {
                 <button
                   onClick={(ev) => {
                     ev.stopPropagation();
-                    if ((added[e.word] ?? "idle") === "idle") add(e.word);
+                    if ((added[e.word] ?? "idle") === "idle") add(e.word, "生词本");
                   }}
+                  title="收入生词本"
                   className={`text-xs shrink-0 inline-flex items-center gap-1 transition-colors ${
                     done(e.word) ? "accent-text" : "t3 hover:text-[var(--text)]"
                   }`}
@@ -187,7 +187,7 @@ export default function Search({ onBack }: { onBack: () => void }) {
                       <button
                         onClick={(ev) => {
                           ev.stopPropagation();
-                          if ((added[e.word] ?? "idle") === "idle") add(e.word);
+                          if ((added[e.word] ?? "idle") === "idle") add(e.word, deck);
                         }}
                         className="text-xs accent-text hairline pt-0.5 shrink-0 hover:opacity-80 transition-opacity"
                       >

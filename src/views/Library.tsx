@@ -134,26 +134,44 @@ export default function Library({ onBack }: { onBack: () => void }) {
   const rowAction = (c: LibCard) => {
     if (confirmId === c.id) {
       return (
-        <button
-          onClick={() => {
-            void deleteCard(c.id).then(() => {
-              setConfirmId(null);
-              reload();
-            });
-          }}
-          className="text-xs text-rose-400 hairline pt-0.5 flex-none hover:opacity-80 transition-opacity"
-        >
-          确认删除
-        </button>
+        <span className="flex-none flex items-center gap-3 text-xs">
+          <button
+            onClick={() =>
+              void deleteCard(c.id).then(() => {
+                setConfirmId(null);
+                setAddId(null);
+                reload();
+              })
+            }
+            className="text-rose-400 hairline pt-0.5 hover:opacity-80 transition-opacity"
+          >
+            确认删除
+          </button>
+          <button
+            onClick={() => setConfirmId(null)}
+            className="t4 hairline pt-0.5 hover:text-[var(--t2)] transition-colors"
+          >
+            取消
+          </button>
+        </span>
       );
     }
     return (
-      <button
-        onClick={() => void setCardSuspended(c.id, !c.suspended).then(reload)}
-        className="text-xs t4 hairline pt-0.5 hover:text-[var(--t2)] transition-colors flex-none"
-      >
-        {c.suspended ? "恢复" : "搁置"}
-      </button>
+      <span className="flex-none flex items-center gap-3 text-xs">
+        <button
+          onClick={() => void setCardSuspended(c.id, !c.suspended).then(reload)}
+          className="t4 hairline pt-0.5 hover:text-[var(--t2)] transition-colors"
+        >
+          {c.suspended ? "恢复" : "搁置"}
+        </button>
+        <button
+          onClick={() => setConfirmId(c.id)}
+          title="从词库删除，云同步会在另一台设备上一并移除"
+          className="t4 hairline pt-0.5 hover:text-rose-400 transition-colors"
+        >
+          删除
+        </button>
+      </span>
     );
   };
 

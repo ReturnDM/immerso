@@ -76,6 +76,17 @@ INSERT OR IGNORE INTO deck_words (word, deck) SELECT word, deck FROM cards;
 "#,
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 4,
+            description: "tombstones_for_sync_deletion",
+            sql: r#"
+CREATE TABLE IF NOT EXISTS tombstones (
+  word TEXT PRIMARY KEY,
+  deleted_at TEXT NOT NULL
+);
+"#,
+            kind: MigrationKind::Up,
+        },
     ]
 }
 
