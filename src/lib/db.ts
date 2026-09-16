@@ -20,7 +20,7 @@ export interface DictEntry {
   pos: string;
   exchange: string;
   /** 查词命中方式：lookup() 填写，其他来源无此字段 */
-  hit?: "exact" | "prefix" | "contains";
+  hit?: "exact" | "prefix" | "contains" | "zh";
 }
 
 interface CardRow {
@@ -128,10 +128,11 @@ function deckClause(deck: string): { sql: string; params: string[] } {
 // ---------- 词典 ----------
 
 const normWord = (s: string) => s.trim().toLowerCase();
+const HAS_CJK = /[\u3400-\u9fff]/;
 
 /**
- * 查词：前缀联想。精确命中置顶（不独占），其余按常用度（词频 → 牛津/柯林斯 → 词长）排序，
- * 打两三个字母就能看到 apple 这类常用词；前缀候选太少时补「包含」匹配兜底。
+ * 查词：英文按前缀联想（精确置顶 + 常用度排序），中文对释义列做子串匹配，
+ * 两路都按常用度（词频 → 牛津/柯林斯 → 词长）排序；前缀候选太少时补「包含」匹配兜底。
  */
 export async function lookup(q: string): Promise<DictEntry[]> {
   const db = await getDict();
@@ -140,6 +141,22 @@ export async function lookup(q: string): Promise<DictEntry[]> {
   // 无词频的排最后；牛津/柯林斯词表次之（用大数与词频域隔开）
   const freqOrd =
     "CASE WHEN frq > 0 THEN frq WHEN oxford > 0 THEN 90000 WHEN collins > 0 THEN 95000 ELSE 999999 END";
+
+  // 中文查英文：匹配释义子串；释义开头（核心词义）命中优先，再按常用度排
+  // （LIKE 全表扫描 ~110ms，本地库可接受）
+  if (HAS_CJK.test(norm)) {
+    const rows = await db.select<DictEntry[]>(
+      `SELECT ${cols} FROM dict
+       WHERE translation LIKE '%' || ? || '%'
+       ORDER BY CASE WHEN instr(translation, ?) BETWEEN 1 AND 30 THEN 0 ELSE 1 END,
+                ${freqOrd}, instr(translation, ?), LENGTH(word), word
+       LIMIT 30`,
+      [q.trim(), q.trim(), q.trim()],
+    );
+    for (const r of rows) r.hit = "zh";
+    return rows;
+  }
+
   const rows = await db.select<DictEntry[]>(
     `SELECT ${cols} FROM dict
      WHERE word LIKE ? ${norm.length === 1 ? "AND frq > 0" : ""}

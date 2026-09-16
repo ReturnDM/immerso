@@ -98,7 +98,7 @@ export default function Search({ onBack }: { onBack: () => void }) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={onKeyDown}
-          placeholder="输入单词查词典…"
+          placeholder="输入单词或中文释义查词典…"
           spellCheck={false}
           className="word-serif field flex-1 px-1 py-2 text-lg t1"
         />
