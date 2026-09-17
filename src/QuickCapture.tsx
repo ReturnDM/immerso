@@ -161,7 +161,7 @@ export default function QuickCapture() {
             {entry.phonetic && entry.phonetic.toLowerCase() !== entry.word.toLowerCase() && (
               <span className="accent-text mr-2">{entry.phonetic}</span>
             )}
-            {entry.translation.split(/\n/)[0]}
+            {entry.translation.split("\\n")[0]}
           </p>
         ) : hasWord ? (
           <p className="text-xs t4">未收录，仍可收进词书</p>

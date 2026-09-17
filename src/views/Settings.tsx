@@ -175,13 +175,14 @@ export default function Settings({ onBack }: { onBack: () => void }) {
   const changeHotkey = async (kind: "direct" | "popup", v: string) => {
     const nextDirect = kind === "direct" ? v : hotkeyDirect;
     const nextPopup = kind === "popup" ? v : hotkeyPopup;
-    if (kind === "direct") setHotkeyDirect(v);
-    else setHotkeyPopup(v);
     setHotkeyMsg(null);
+    // 先校验再改状态落库，重复键时界面与已存设置保持一致（刷新后不跳变）
     if (nextDirect && nextPopup && nextDirect === nextPopup) {
       setHotkeyMsg("✗ 两个热键不能相同");
       return;
     }
+    if (kind === "direct") setHotkeyDirect(v);
+    else setHotkeyPopup(v);
     await setSetting(kind === "direct" ? "hotkey_direct" : "hotkey_popup", v);
     try {
       await invoke("set_quick_hotkeys", { direct: nextDirect, popup: nextPopup });

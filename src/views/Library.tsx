@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { MorphIcon } from "morphicons/react";
 import { Plus, Check } from "lucide";
 import {
@@ -95,6 +96,17 @@ export default function Library({ onBack }: { onBack: () => void }) {
     void getTodayStats("全部").then((s) => setTotalCount(s.library));
   }, []);
 
+  // 收词（查词页/小窗/划词直加）改了词库 → 回到第一页刷新，新词排在最上面
+  useEffect(() => {
+    const un = listen("library-changed", () => {
+      void load(deck, filter, q, 0);
+      reloadDecks();
+    });
+    return () => {
+      void un.then((f) => f());
+    };
+  }, [deck, filter, q, load, reloadDecks]);
+
   useEffect(() => {
     reloadDecks();
   }, [reloadDecks, cards]);
@@ -124,6 +136,7 @@ export default function Library({ onBack }: { onBack: () => void }) {
     try {
       setImportMsg(await importBook(b));
       reloadDecks();
+      void load(deck, filter, q, 0); // 导入的词立即进列表（最新在最前）
     } catch (e) {
       setImportMsg(`导入失败：${String(e)}`);
     } finally {

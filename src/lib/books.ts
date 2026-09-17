@@ -29,6 +29,13 @@ export async function importBook(b: CatalogBook): Promise<string> {
   );
   const fresh = words.filter((w) => !existing.has(w.toLowerCase()));
 
+  // 收词即复活：导入的新卡清掉旧删除墓碑，与 addCard 同语义（否则下次同步可能被旧墓碑反杀）
+  for (let i = 0; i < fresh.length; i += 300) {
+    const chunk = fresh.slice(i, i + 300);
+    const ph = chunk.map(() => "?").join(",");
+    await db.execute(`DELETE FROM tombstones WHERE word COLLATE NOCASE IN (${ph})`, chunk);
+  }
+
   // 新词建卡（卡的主词书即本书）
   for (let i = 0; i < fresh.length; i += 300) {
     const chunk = fresh.slice(i, i + 300);

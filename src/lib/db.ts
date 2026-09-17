@@ -1,4 +1,5 @@
 import Database from "@tauri-apps/plugin-sql";
+import { emitTo } from "@tauri-apps/api/event";
 import type { Card, Grade, RecordLogItem } from "ts-fsrs";
 import { toCard } from "./fsrs";
 import { DEFAULT_MODES, parseModes, serializeModes, type ExMode } from "./exercises";
@@ -11,6 +12,11 @@ let appP: Promise<Database> | null = null;
 // dict.db 由 Rust 启动时从安装包 resources 释放到数据目录（无内置资源的老安装/开发机用脚本生成的那份）
 export const getDict = () => (dictP ??= Database.load("sqlite:dict.db"));
 export const getApp = () => (appP ??= Database.load("sqlite:immerso.db"));
+
+/** 词库内容变了（收词/加词书）：通知主窗口词库页刷新。小窗/主窗自身发出均可，失败静默 */
+function libraryChanged(): void {
+  void emitTo("main", "library-changed").catch(() => {});
+}
 
 export interface DictEntry {
   word: string;
@@ -48,13 +54,6 @@ export interface QueueItem {
   dict: DictEntry | null;
   /** 间隔式练习的断点：带着它插回队列，轮到时从 seq[pos] 续练 */
   resume?: { seq: ExMode[]; pos: number; errors: number };
-}
-
-/** 本地日期的零点，用 ISO（UTC）字符串与库里的 ISO 时间比较 */
-function localDayStartISO(): string {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d.toISOString();
 }
 
 // ---------- 设置 ----------
@@ -225,7 +224,16 @@ export async function addCard(
     "SELECT id FROM cards WHERE word = ? COLLATE NOCASE",
     [word],
   );
-  if (dup.length > 0) return "exists";
+  if (dup.length > 0) {
+    // 卡已存在（如词书导入过）：仍要确保收进指定词书，否则「已在库」却永远不进生词本
+    const r = await db.execute(
+      "INSERT OR IGNORE INTO deck_words (word, deck) VALUES (?, ?)",
+      [word, deck],
+    );
+    const tagged = (r.rowsAffected ?? 0) > 0;
+    if (tagged) libraryChanged();
+    return tagged ? "added" : "exists";
+  }
   let sourceId: number | null = null;
   if (context && context.trim()) {
     const src = await db.execute(
@@ -242,6 +250,7 @@ export async function addCard(
     "INSERT OR IGNORE INTO deck_words (word, deck) VALUES (?, ?)",
     [word, deck],
   );
+  libraryChanged();
   return "added";
 }
 
@@ -259,12 +268,19 @@ async function count(db: Database, sql: string, params: unknown[] = []): Promise
 }
 
 async function newQuotaLeft(db: Database, deck: string): Promise<number> {
-  // reps = 1 且首次复习在今天 ⇒ 今天新引入的卡
+  // 今天首次被复习的卡 = 今天新引入。不能数 reps（同一天复习第二次 reps 就变 2），
+  // 用 reviews 里"没有早于今天的记录、且有今天的记录"判定；reviewed_at 是 SQLite
+  // localtime 格式，阈值也用 SQLite 本地当日零点，避免跨格式字典序比较
   const { sql: dc, params: dp } = deckClause(deck);
   const introduced = await count(
     db,
-    `SELECT COUNT(*) n FROM cards c WHERE c.reps = 1 AND c.last_review >= ?${dc}`,
-    [localDayStartISO(), ...dp],
+    `SELECT COUNT(*) n FROM cards c
+     WHERE c.suspended = 0${dc}
+       AND EXISTS (SELECT 1 FROM reviews r WHERE r.card_id = c.id
+                   AND r.reviewed_at >= datetime('now', 'localtime', 'start of day'))
+       AND NOT EXISTS (SELECT 1 FROM reviews r WHERE r.card_id = c.id
+                       AND r.reviewed_at < datetime('now', 'localtime', 'start of day'))`,
+    dp,
   );
   return Math.max(0, (await getDailyNew()) - introduced);
 }
@@ -286,8 +302,9 @@ export async function getTodayStats(deck: string): Promise<TodayStats> {
   const newCount = Math.min(await newQuotaLeft(db, deck), availableNew);
   const doneToday = await count(
     db,
-    "SELECT COUNT(*) n FROM reviews WHERE reviewed_at >= ?",
-    [localDayStartISO()],
+    // reviewed_at 是 SQLite datetime('now','localtime') 格式，阈值同格式才能正确比较
+    // （JS 的 UTC ISO 与它做字典序比较只在东八区碰巧正确）
+    "SELECT COUNT(*) n FROM reviews WHERE reviewed_at >= datetime('now', 'localtime', 'start of day')",
   );
   const library = await count(
     db,
@@ -369,7 +386,7 @@ export type LibFilter = "all" | "new" | "learned";
 
 export const LIB_PAGE_SIZE = 200;
 
-/** 分页取卡：page 从 0 起；排序稳定（id 升序），翻页不重不漏 */
+/** 分页取卡：page 从 0 起；最新收的排最前（新收的词一眼可见），翻页不重不漏 */
 export async function getLibrary(
   deck: string,
   filter: LibFilter,
@@ -392,7 +409,7 @@ export async function getLibrary(
   params.push(LIB_PAGE_SIZE, page * LIB_PAGE_SIZE);
   return db.select<LibCard[]>(
     `SELECT id, word, state, reps, due, deck, suspended FROM cards
-     WHERE ${conds.join(" AND ")} ORDER BY id LIMIT ? OFFSET ?`,
+     WHERE ${conds.join(" AND ")} ORDER BY id DESC LIMIT ? OFFSET ?`,
     params,
   );
 }
@@ -435,6 +452,7 @@ export async function addWordToDeck(word: string, deck: string): Promise<void> {
     word,
     deck.trim(),
   ]);
+  libraryChanged();
 }
 
 export async function setCardSuspended(id: number, suspended: boolean): Promise<void> {

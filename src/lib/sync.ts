@@ -148,6 +148,17 @@ export async function mergeIntoLocal(data: Backup): Promise<string> {
     );
   }
 
+  // 墓碑预过期：远端卡是删除之后重新收的 → 旧墓碑作废。
+  // 必须在 restoreDeckWords 之前做，否则复活词的词书标签会被未清理的墓碑一并滤掉（词在卡在、标签全丢）
+  for (const c of data.cards) {
+    const key = c.word.toLowerCase();
+    const tomb = tombstones.get(key);
+    if (tomb && (c.added_at ?? "") >= tomb) {
+      await db.execute("DELETE FROM tombstones WHERE word = ? COLLATE NOCASE", [c.word]);
+      tombstones.delete(key);
+    }
+  }
+
   await restoreDeckWords(data, tombstones);
   // 复习记录指纹（词,时间,评分）
   const reviewKeys = new Set(

@@ -87,6 +87,18 @@ CREATE TABLE IF NOT EXISTS tombstones (
 "#,
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 5,
+            description: "backfill_orphan_deck_tags",
+            // 修复存量：历史同步 bug 曾让「删除后重收」的词复活时丢掉全部词书标签，
+            // 词卡在却在任何词书里都不可见——按卡的主词书补一张标签兜底
+            sql: r#"
+INSERT OR IGNORE INTO deck_words (word, deck)
+SELECT c.word, c.deck FROM cards c
+WHERE NOT EXISTS (SELECT 1 FROM deck_words dw WHERE dw.word = c.word);
+"#,
+            kind: MigrationKind::Up,
+        },
     ]
 }
 
