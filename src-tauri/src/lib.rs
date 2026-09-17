@@ -324,21 +324,26 @@ fn set_quick_hotkeys(
     register_hotkeys(&app, d, p)
 }
 
-/// 剪贴板版本号（Windows）。序号不变 = 目标应用没把选区写进剪贴板
-/// （未响应/无选区/权限被拒），此时读到的只会是用户旧剪贴板——
-/// 不判定就会把无关内容当成选中的词收进词书。
-/// macOS 拿 changeCount 需要引入 objc2-app-kit 新依赖（拉不动 crates.io，暂缓），
-/// 退回「读到的文本与旧剪贴板不同」判定，见 capture_selected
+/// 剪贴板版本号：macOS 为 NSPasteboard.changeCount，Windows 为 GetClipboardSequenceNumber。
+/// 模拟 ⌘C 后序号不变 = 目标应用没把选区写进剪贴板（未响应/无选区/权限被拒），
+/// 此时读到的只会是用户旧剪贴板——不判定就会把无关内容当成选中的词收进词书
+#[cfg(target_os = "macos")]
+fn clipboard_seq() -> usize {
+    use objc2_app_kit::NSPasteboard;
+    NSPasteboard::generalPasteboard().changeCount().max(0) as usize
+}
+
 #[cfg(target_os = "windows")]
 fn clipboard_seq() -> usize {
     #[link(name = "user32")]
     extern "C" {
         fn GetClipboardSequenceNumber() -> u32;
     }
-    unsafe { GetClipboardSequenceNumber() as usize }
+    unsafe { GetClipboardSequenceNumber() as u32 as usize }
 }
 
-#[cfg(not(target_os = "windows"))]
+/// 其余平台拿不到序号：视为「已变化」，退回固定等待后读取的老行为
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn clipboard_seq() -> usize {
     0
 }
@@ -361,8 +366,11 @@ async fn capture_selected(app: tauri::AppHandle) -> Result<String, String> {
         use enigo::{Direction, Enigo, Key, Keyboard, Settings};
         use tauri_plugin_clipboard_manager::ClipboardExt;
 
-        // Windows 能查剪贴板序号；macOS 只能比对内容
-        let seq_supported = cfg!(target_os = "windows");
+        // macOS/Windows 都能查剪贴板序号；其余平台退回内容比对
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        let seq_supported = true;
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        let seq_supported = false;
 
         // 复制前快照：序号（判定复制是否发生）+ 旧内容（文本/图片，事后还原）
         let seq_before = clipboard_seq();
@@ -396,8 +404,8 @@ async fn capture_selected(app: tauri::AppHandle) -> Result<String, String> {
                         .filter(|t| !t.is_empty());
                 }
             } else {
-                // 以「读到的文本与旧剪贴板不同」为准。盲区：选中文本恰好与旧剪贴板
-                // 相同时无法与「复制失败」区分，按没读到处理
+                // 拿不到序号的平台（如 Linux）：以「读到的文本与旧剪贴板不同」为准。
+                // 盲区：选中文本恰好与旧剪贴板相同时无法与「复制失败」区分，按没读到处理
                 match app.clipboard().read_text() {
                     Ok(t) if !t.is_empty() && Some(&t) != old_text.as_ref() => text = Some(t),
                     _ => {}
