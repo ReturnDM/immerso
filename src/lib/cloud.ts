@@ -116,6 +116,32 @@ export async function cloudSync(): Promise<string> {
   return report ? `✓ 云同步：${report}` : `✓ 云同步完成（${merged.cards.length} 卡已上云）`;
 }
 
+/** 从用户输入解析 Gist ID：完整 URL、裸 ID 均可；不合法返回 null */
+export function parseGistId(input: string): string | null {
+  const s = input.trim();
+  const fromUrl = s.match(/gist\.github\.com\/(?:g\/)?([\da-zA-Z]+)\/?$/);
+  const id = fromUrl ? fromUrl[1] : s;
+  return /^[\da-zA-Z]{16,64}$/.test(id) ? id : null;
+}
+
+/**
+ * 新设备/重装后接入已有云端：粘贴原 Gist 地址或 ID，校验确实是浸词备份后
+ * 指过去并立即全量同步（合并 + 推回），避免误建新 Gist 造成数据分叉。
+ */
+export async function adoptGist(input: string): Promise<string> {
+  const token = await getGhToken();
+  if (!token) throw new Error("请先配置 GitHub Token");
+  const id = parseGistId(input);
+  if (!id) throw new Error("无法识别 Gist 地址或 ID");
+  const remote = await fetchGist(token, id);
+  if (!remote) throw new Error(`Gist ${id} 不存在或不可访问（确认 Token 属于同一账号）`);
+  if (remote.app !== "immerso" || !Array.isArray(remote.cards)) {
+    throw new Error("该 Gist 存在，但内容不是浸词备份");
+  }
+  await setSetting("cloud_gist_id", id);
+  return `✓ 已接入 ${id.slice(0, 8)}… 的云端 · ${await cloudSync()}`;
+}
+
 /** 自动同步：已配置且未关闭时执行，返回状态文本（错误也以文本返回，不打扰界面） */
 export async function maybeAutoSync(): Promise<string | null> {
   const token = await getGhToken();

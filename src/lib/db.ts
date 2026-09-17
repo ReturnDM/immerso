@@ -2,6 +2,7 @@ import Database from "@tauri-apps/plugin-sql";
 import { emitTo } from "@tauri-apps/api/event";
 import type { Card, Grade, RecordLogItem } from "ts-fsrs";
 import { toCard } from "./fsrs";
+import { editDistance } from "./spell";
 import { DEFAULT_MODES, parseModes, serializeModes, type ExMode } from "./exercises";
 
 export const DEFAULT_DAILY_NEW = 10;
@@ -26,7 +27,7 @@ export interface DictEntry {
   pos: string;
   exchange: string;
   /** 查词命中方式：lookup() 填写，其他来源无此字段 */
-  hit?: "exact" | "prefix" | "contains" | "zh";
+  hit?: "exact" | "prefix" | "contains" | "zh" | "suggest";
 }
 
 interface CardRow {
@@ -182,7 +183,41 @@ export async function lookup(q: string): Promise<DictEntry[]> {
       rows.push(r);
     }
   }
+  // 兜底拼写纠错：彻底查不到时，从常用词里找编辑距离相近的（recieve→receive）
+  if (rows.length === 0) {
+    for (const r of await suggestEntries(norm)) {
+      r.hit = "suggest";
+      rows.push(r);
+    }
+  }
   return rows;
+}
+
+// ---------- 拼写建议 ----------
+
+/** 常用词表（按词频取前 2 万，会话级缓存一次） */
+let commonWordsCache: Promise<string[]> | null = null;
+
+async function suggestEntries(q: string): Promise<DictEntry[]> {
+  if (q.length < 3) return [];
+  const db = await getDict();
+  commonWordsCache ??= db
+    .select<{ word: string }[]>("SELECT word FROM dict WHERE frq > 0 ORDER BY frq LIMIT 20000")
+    .then((rows) => rows.map((r) => r.word));
+  const list = await commonWordsCache;
+  const maxD = q.length >= 6 ? 2 : 1;
+  const hits: { w: string; d: number; i: number }[] = [];
+  for (let i = 0; i < list.length; i++) {
+    const w = list[i];
+    if (Math.abs(w.length - q.length) > maxD) continue;
+    const d = editDistance(q, w.toLowerCase());
+    if (d <= maxD) hits.push({ w, d, i });
+  }
+  hits.sort((a, b) => a.d - b.d || a.i - b.i); // 距离优先，同距按常用度（词频序）
+  const top = hits.slice(0, 8).map((h) => h.w);
+  if (top.length === 0) return [];
+  const map = await dictEntries(top);
+  return top.map((w) => map.get(w.toLowerCase())).filter((e): e is DictEntry => e !== undefined);
 }
 
 /** 词形还原：变形词 → 词基（lemma 表，未命中返回 null） */
@@ -486,6 +521,63 @@ export async function getTombstones(): Promise<Map<string, string>> {
     "SELECT word, deleted_at FROM tombstones",
   );
   return new Map(rows.map((r) => [r.word.toLowerCase(), r.deleted_at]));
+}
+
+/**
+ * 整本移除词书：摘掉该书全部标签；独占词（不在其他词书）连卡带复习记录整删并记墓碑
+ * （同步时另一台设备同样删除）。记入 deck_removals，同步合并据此不再把该书标签灌回来。
+ */
+export async function deleteDeck(deck: string): Promise<{ tags: number; deleted: number }> {
+  const db = await getApp();
+  const words = (
+    await db.select<{ word: string }[]>("SELECT word FROM deck_words WHERE deck = ?", [deck])
+  ).map((r) => r.word);
+  if (words.length === 0) return { tags: 0, deleted: 0 };
+
+  // 独占词 = 除本书外不在任何词书
+  const others = await getWordDecks(words);
+  const orphans = words.filter(
+    (w) => (others.get(w.toLowerCase())?.filter((d) => d !== deck).length ?? 0) === 0,
+  );
+
+  // 摘掉本书全部标签 + 记录移除（先记，防止后续同步回灌）
+  await db.execute("DELETE FROM deck_words WHERE deck = ?", [deck]);
+  await db.execute(
+    "INSERT INTO deck_removals (deck, removed_at) VALUES (?, datetime('now','localtime')) ON CONFLICT(deck) DO UPDATE SET removed_at = excluded.removed_at",
+    [deck],
+  );
+
+  // 独占词整删：批量 SQL（逐词走 deleteCard 会是几千次 IPC 往返）
+  const CHUNK = 300;
+  for (let i = 0; i < orphans.length; i += CHUNK) {
+    const chunk = orphans.slice(i, i + CHUNK);
+    const ph = chunk.map(() => "?").join(",");
+    await db.execute(
+      `INSERT INTO tombstones (word, deleted_at)
+       SELECT word, datetime('now','localtime') FROM cards WHERE word COLLATE NOCASE IN (${ph})
+       ON CONFLICT(word) DO UPDATE SET deleted_at = excluded.deleted_at`,
+      chunk,
+    );
+    await db.execute(
+      `DELETE FROM reviews WHERE card_id IN (SELECT id FROM cards WHERE word COLLATE NOCASE IN (${ph}))`,
+      chunk,
+    );
+    await db.execute(
+      `UPDATE cards SET source_id = NULL WHERE source_id IS NOT NULL AND word COLLATE NOCASE IN (${ph})`,
+      chunk,
+    );
+    await db.execute(`DELETE FROM cards WHERE word COLLATE NOCASE IN (${ph})`, chunk);
+  }
+  if (orphans.length > 0) {
+    await db.execute(
+      "DELETE FROM sources WHERE id NOT IN (SELECT source_id FROM cards WHERE source_id IS NOT NULL)",
+    );
+  }
+
+  // 当前词书若指向被移除的书，回「全部」
+  if ((await getSetting("current_deck")) === deck) await setCurrentDeck("全部");
+  libraryChanged();
+  return { tags: words.length, deleted: orphans.length };
 }
 
 /** 给已有卡片补原句（仅在它还没有原句时写入；无 source 则建一条） */

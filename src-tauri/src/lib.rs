@@ -1,3 +1,5 @@
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_sql::{Migration, MigrationKind};
@@ -99,7 +101,29 @@ WHERE NOT EXISTS (SELECT 1 FROM deck_words dw WHERE dw.word = c.word);
 "#,
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 6,
+            description: "deck_removals_for_book_delete",
+            // 整本移除词书的本地记录：同步合并（并集只增不删）据此跳过已移除词书的标签，
+            // 防止另一台设备的备份把移掉的书灌回来。只在本机生效，不进备份格式
+            sql: r#"
+CREATE TABLE IF NOT EXISTS deck_removals (
+  deck TEXT PRIMARY KEY,
+  removed_at TEXT NOT NULL
+);
+"#,
+            kind: MigrationKind::Up,
+        },
     ]
+}
+
+/// 唤起主窗（托盘左键/菜单、二次启动实例共用）
+fn show_main(app: &tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+    }
 }
 
 /// 查词小窗热键：呼出 / 收起快速收词小窗。
@@ -278,6 +302,10 @@ async fn gist_http(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // 单实例必须第一个注册：再次点开应用时唤起已在后台运行的实例，而不是开第二个进程
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_main(app);
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_http::init())
@@ -297,7 +325,48 @@ pub fn run() {
             open_quick,
             gist_http
         ])
+        // 关闭主窗 = 缩到托盘后台（热键照常可用）；退出走托盘菜单或 Cmd+Q。
+        // 隐藏不走关闭流程，窗口位置/大小在这里显式落盘
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    api.prevent_close();
+                    use tauri_plugin_window_state::{AppHandleExt, StateFlags};
+                    let _ = window.app_handle().save_window_state(
+                        StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED,
+                    );
+                    let _ = window.hide();
+                }
+            }
+        })
         .setup(|app| {
+            // 系统托盘：驻留后台的常驻入口
+            let show_item = MenuItem::with_id(app, "tray-show", "显示浸词", true, None::<&str>)?;
+            let quick_item = MenuItem::with_id(app, "tray-quick", "快速收词", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "tray-quit", "退出", true, None::<&str>)?;
+            let tray_menu = Menu::with_items(app, &[&show_item, &quick_item, &quit_item])?;
+            TrayIconBuilder::with_id("immerso-tray")
+                .icon(app.default_window_icon().expect("缺默认图标").clone())
+                .tooltip("浸词 · 后台运行中")
+                .menu(&tray_menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "tray-show" => show_main(app),
+                    "tray-quick" => toggle_quick(app),
+                    "tray-quit" => app.exit(0),
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        show_main(tray.app_handle());
+                    }
+                })
+                .build(app)?;
             // 内置词典释放：安装包带 resources/dict.db 时拷到数据目录（大小不同视为新版覆盖）。
             // 不让插件直读资源绝对路径——sqlx 对 Windows 绝对路径连接串解析不可靠。
             let res = app

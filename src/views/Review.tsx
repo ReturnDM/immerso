@@ -10,7 +10,7 @@ import {
 } from "../lib/db";
 import { previewOptions, speak, stateLabel } from "../lib/fsrs";
 import { maybeAutoSync } from "../lib/cloud";
-import { buildSequence, deferGap, EX_MODES, type ExMode } from "../lib/exercises";
+import { buildSequence, blankWord, deferGap, wordForms, EX_MODES, type ExMode } from "../lib/exercises";
 import { Icon } from "../components/Icon";
 
 // ECDICT 的 translation 用字面 "\n" 分隔多条释义
@@ -40,13 +40,6 @@ const GRADE_LABEL: Record<number, string> = {
 const norm = (s: string) => s.trim().toLowerCase();
 const shuffle = <T,>(a: T[]): T[] =>
   a.map((v) => [Math.random(), v] as const).sort((x, y) => x[0] - y[0]).map(([, v]) => v);
-
-/** 原句挖空：把目标词（不分大小写、词边界）替换为下划线；找不到返回 false（句子照显，直接默写） */
-function blankWord(sentence: string, word: string): { text: string; found: boolean } {
-  const esc = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const re = new RegExp(`\\b${esc}\\b`, "i");
-  return { text: sentence.replace(re, "_____"), found: re.test(sentence) };
-}
 
 /** 组词成句：点击乱序 token 拼回原句，全部放对自动判对 */
 function Scramble({
@@ -203,6 +196,10 @@ export default function Review({ onExit }: { onExit: () => void }) {
     ? "self"
     : mode;
   const typing = effMode === "dictation" || effMode === "listen" || effMode === "cloze";
+  // 原句挖空（含词形）：cloze 出题与判分共用一份
+  const cloze = item && effMode === "cloze"
+    ? blankWord(item.sourceContext ?? "", item.word, wordForms(item.dict?.exchange))
+    : null;
   // 新词教学：state 仍为 New 的卡首遇先教后测（重试卡携带新状态，不会重教）
   const teaching = !!item && item.card.state === 0 && taughtId !== item.id;
 
@@ -327,7 +324,16 @@ export default function Review({ onExit }: { onExit: () => void }) {
     setIntervals(iv);
     setRevealed(true);
     if (autoSpeak.current) speak(item.word);
-    if (norm(answer) === norm(item.word)) {
+    // 句中被挖掉的可能不是原形（went/go）：填词形或原形都算对
+    const { form } = blankWord(
+      item.sourceContext ?? "",
+      item.word,
+      wordForms(item.dict?.exchange),
+    );
+    const ok =
+      norm(answer) === norm(item.word) ||
+      (form !== null && norm(answer) === norm(form));
+    if (ok) {
       setPhase("right");
       autoGrade.current = Rating.Good;
     } else {
@@ -601,11 +607,11 @@ export default function Review({ onExit }: { onExit: () => void }) {
               {effMode === "cloze" ? (
                 <>
                   <p className="mt-7 text-lg t1 leading-relaxed text-left">
-                    {blankWord(item!.sourceContext ?? "", item!.word).text}
+                    {cloze!.text}
                   </p>
-                  {!blankWord(item!.sourceContext ?? "", item!.word).found && (
+                  {!cloze!.found && (
                     <p className="mt-2 text-[11px] t4 text-left">
-                      原句里没有该词原形，按释义直接默写
+                      原句里没有该词或其词形，按释义直接默写
                     </p>
                   )}
                   <p className="word-serif mt-3 text-sm t3">{firstLine(item!.dict?.translation)}</p>

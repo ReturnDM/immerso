@@ -5,6 +5,7 @@ import { Plus, Check } from "lucide";
 import {
   addWordToDeck,
   deleteCard,
+  deleteDeck,
   getAllDeckNames,
   getDecks,
   getLibrary,
@@ -37,6 +38,7 @@ export default function Library({ onBack }: { onBack: () => void }) {
   const [catalog, setCatalog] = useState<CatalogBook[] | null>(null);
   const [importing, setImporting] = useState<string | null>(null);
   const [importMsg, setImportMsg] = useState<string | null>(null);
+  const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
   /** 追加一页；page 0 = 重置列表（筛选条件变化时走这里） */
@@ -139,6 +141,24 @@ export default function Library({ onBack }: { onBack: () => void }) {
       void load(deck, filter, q, 0); // 导入的词立即进列表（最新在最前）
     } catch (e) {
       setImportMsg(`导入失败：${String(e)}`);
+    } finally {
+      setImporting(null);
+    }
+  };
+
+  const doRemove = async (b: CatalogBook) => {
+    setImporting(b.id);
+    setConfirmRemoveId(null);
+    setImportMsg(null);
+    try {
+      const r = await deleteDeck(b.name);
+      setImportMsg(`已移除「${b.name}」：摘 ${r.tags} 个标签，独占词整删 ${r.deleted} 个`);
+      reloadDecks();
+      // 正在浏览被移除的书 → 回「全部」（会触发筛选 effect 重载），否则原地刷新列表
+      if (deck === b.name) setDeck("全部");
+      else void load(deck, filter, q, 0);
+    } catch (e) {
+      setImportMsg(`移除失败：${String(e)}`);
     } finally {
       setImporting(null);
     }
@@ -382,10 +402,32 @@ export default function Library({ onBack }: { onBack: () => void }) {
                       <p className="text-[11px] t3 truncate">{b.desc}</p>
                     </div>
                     <div className="ml-auto flex-none text-xs">
-                      {imported ? (
-                        <span className="t4">已导入</span>
-                      ) : importing === b.id ? (
-                        <span className="accent-text">导入中…</span>
+                      {importing === b.id ? (
+                        <span className="accent-text">处理中…</span>
+                      ) : confirmRemoveId === b.id ? (
+                        <span className="inline-flex items-center gap-2.5">
+                          <span className="t4">独占词将一并删除</span>
+                          <button
+                            onClick={() => void doRemove(b)}
+                            className="text-rose-400 hairline pt-0.5 hover:opacity-80 transition-opacity"
+                          >
+                            确认移除
+                          </button>
+                          <button
+                            onClick={() => setConfirmRemoveId(null)}
+                            className="t4 hairline pt-0.5 hover:text-[var(--t2)] transition-colors"
+                          >
+                            取消
+                          </button>
+                        </span>
+                      ) : imported ? (
+                        <button
+                          onClick={() => setConfirmRemoveId(b.id)}
+                          title="摘掉整本词书；只在这本书里的词会连学习记录一起删除"
+                          className="t4 hairline pt-0.5 hover:text-rose-400 transition-colors"
+                        >
+                          移除
+                        </button>
                       ) : (
                         <button
                           onClick={() => void doImport(b)}

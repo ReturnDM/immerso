@@ -35,6 +35,8 @@ export async function importBook(b: CatalogBook): Promise<string> {
     const ph = chunk.map(() => "?").join(",");
     await db.execute(`DELETE FROM tombstones WHERE word COLLATE NOCASE IN (${ph})`, chunk);
   }
+  // 重新导入同名词书 = 复活：清掉整本移除记录，同步才能把标签恢复回来
+  await db.execute("DELETE FROM deck_removals WHERE deck = ?", [b.name]);
 
   // 新词建卡（卡的主词书即本书）
   for (let i = 0; i < fresh.length; i += 300) {

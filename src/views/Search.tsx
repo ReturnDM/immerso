@@ -85,6 +85,7 @@ export default function Search({ onBack }: { onBack: () => void }) {
 
   const done = (word: string) => ["added", "exists"].includes(added[word] ?? "idle");
   const containsFrom = entries ? entries.findIndex((x) => x.hit === "contains") : -1;
+  const suggestFrom = entries ? entries.findIndex((x) => x.hit === "suggest") : -1;
   const addLabel = (word: string): string =>
     ({ idle: "加入", adding: "…", added: "已收入", exists: "已在库" })[added[word] ?? "idle"];
 
@@ -112,6 +113,9 @@ export default function Search({ onBack }: { onBack: () => void }) {
             <div key={e.word} className="py-4 border-t border-[var(--border)]">
               {i === containsFrom && (
                 <p className="pb-3 text-xs t4">包含「{query.trim()}」的词</p>
+              )}
+              {i === suggestFrom && (
+                <p className="pb-3 text-xs t4">词典里没有「{query.trim()}」——拼写相近的词</p>
               )}
               <div
                 className="flex items-baseline gap-3 cursor-pointer -mx-3 px-3 py-1.5 rounded-md

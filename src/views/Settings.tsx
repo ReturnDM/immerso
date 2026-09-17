@@ -14,7 +14,7 @@ import { EX_MODES, type ExMode } from "../lib/exercises";
 import { lastSyncText, neathSync } from "../lib/neath";
 import { changeTheme, currentTheme, type Theme } from "../lib/theme";
 import { exportData, importData } from "../lib/sync";
-import { clearGhToken, cloudSync, getGhToken, lastCloudSyncText, saveGhToken } from "../lib/cloud";
+import { clearGhToken, cloudSync, getGhToken, lastCloudSyncText, saveGhToken, adoptGist } from "../lib/cloud";
 import { Icon } from "../components/Icon";
 
 import { isMac } from "../lib/platform";
@@ -159,6 +159,9 @@ export default function Settings({ onBack }: { onBack: () => void }) {
   const [hotkeyDirect, setHotkeyDirect] = useState("alt+q");
   const [hotkeyPopup, setHotkeyPopup] = useState("alt+e");
   const [hotkeyMsg, setHotkeyMsg] = useState<string | null>(null);
+  const [adoptOpen, setAdoptOpen] = useState(false);
+  const [adoptInput, setAdoptInput] = useState("");
+  const [adoptBusy, setAdoptBusy] = useState(false);
 
   useEffect(() => {
     getDailyNew().then((v) => setQuota(String(v)));
@@ -386,6 +389,50 @@ export default function Settings({ onBack }: { onBack: () => void }) {
               </>
             )}
           </div>
+
+          {ghToken && (
+            <div className="mt-3">
+              <button
+                onClick={() => setAdoptOpen((o) => !o)}
+                className="text-xs t4 hover:text-[var(--text)] transition-colors"
+                title="换新设备或重装后，接入原来的云端数据，避免新建 Gist 造成分叉"
+              >
+                {adoptOpen ? "收起" : "接入已有云端"}
+              </button>
+              {adoptOpen && (
+                <div className="mt-2 flex items-center gap-3">
+                  <input
+                    value={adoptInput}
+                    onChange={(e) => setAdoptInput(e.target.value)}
+                    placeholder="粘贴原 Gist 地址或 ID（https://gist.github.com/…）"
+                    spellCheck={false}
+                    className="field flex-1 px-1 py-1 text-xs t1"
+                  />
+                  <button
+                    onClick={async () => {
+                      if (!adoptInput.trim() || adoptBusy) return;
+                      setAdoptBusy(true);
+                      setCloudMsg(null);
+                      try {
+                        setCloudMsg(await adoptGist(adoptInput));
+                        setLastCloud(await lastCloudSyncText());
+                        setAdoptInput("");
+                        setAdoptOpen(false);
+                      } catch (e) {
+                        setCloudMsg(`✗ ${String(e)}`);
+                      } finally {
+                        setAdoptBusy(false);
+                      }
+                    }}
+                    disabled={adoptBusy || !adoptInput.trim()}
+                    className="text-xs t3 hover:text-[var(--text)] transition-colors disabled:opacity-40 flex-none"
+                  >
+                    {adoptBusy ? "接入中…" : "接入"}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="mt-3 flex items-center gap-4 text-xs">
             <button

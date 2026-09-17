@@ -73,3 +73,36 @@ export function deferGap(stage: number, wrong: boolean): number {
   if (wrong) return 2;
   return Math.min(2 + stage * 2, 8) + Math.floor(Math.random() * 2);
 }
+
+/**
+ * ECDICT exchange 词形变化表 → 变形式列表。
+ * 代码：d 过去式 / p 过去分词 / i 现在分词 / 3 三单 / r 比较级 / t 最高级 / s 复数；
+ * 0/1/2 是词基指针不是形，不取。
+ */
+export function wordForms(exchange: string | null | undefined): string[] {
+  if (!exchange) return [];
+  const out: string[] = [];
+  for (const part of exchange.split("/")) {
+    const m = part.match(/^[dpi3rts]:(.+)$/);
+    if (m) out.push(m[1].trim());
+  }
+  return [...new Set(out)].filter((s) => s.length > 0 && s.length <= 48);
+}
+
+/**
+ * 原句挖空：依次尝试原形与各词形（不分大小写、词边界），替换首个命中的形为下划线。
+ * 句中是 went 而卡是 go 时也能挖掉；全都不中返回 found=false（句子照显，按释义默写）。
+ */
+export function blankWord(
+  sentence: string,
+  word: string,
+  forms: string[] = [],
+): { text: string; found: boolean; form: string | null } {
+  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  for (const w of [word, ...forms]) {
+    if (!w) continue;
+    const re = new RegExp(`\\b${esc(w)}\\b`, "i");
+    if (re.test(sentence)) return { text: sentence.replace(re, "_____"), found: true, form: w };
+  }
+  return { text: sentence, found: false, form: null };
+}

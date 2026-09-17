@@ -83,8 +83,13 @@ async function restoreDeckWords(data: Backup, tombstones: Map<string, string>): 
     Array.isArray(data.deck_words) && data.deck_words.length > 0
       ? data.deck_words
       : data.cards.map((c) => ({ word: c.word, deck: c.deck || "生词本" }));
+  // 本机整本移除过的词书：并集只增不删，跳过它的标签防止远端把移掉的书灌回来
+  const removedDecks = new Set(
+    (await db.select<{ deck: string }[]>("SELECT deck FROM deck_removals")).map((r) => r.deck),
+  );
   const seen = new Set<string>();
   const unique = pairs.filter((p) => {
+    if (removedDecks.has(p.deck)) return false;
     if (tombstones.has(p.word.toLowerCase())) return false;
     const k = `${p.word.toLowerCase()}|${p.deck}`;
     if (seen.has(k)) return false;
