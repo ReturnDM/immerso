@@ -24,6 +24,7 @@ export default function QuickCapture() {
   const [busy, setBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const lastPrep = useRef(0);
+  const resolveRequest = useRef(0);
 
   /** 每次呼出：读剪贴板。整句（≥3 词）进原句栏待补单词；单词直接进词条 */
   const prepare = useCallback(async () => {
@@ -65,13 +66,17 @@ export default function QuickCapture() {
 
   // 输入防抖 160ms 动态解析：精确释义 / 词形还原 / 已在词书
   useEffect(() => {
+    // 输入一变就让先前的异步解析失效，防止旧单词的结果覆盖当前输入。
+    const id = ++resolveRequest.current;
     const w = word.trim();
     if (!w) {
       setResolved(null);
       return;
     }
     const t = setTimeout(() => {
-      void resolveWord(w).then(setResolved);
+      void resolveWord(w).then((next) => {
+        if (id === resolveRequest.current) setResolved(next);
+      });
     }, 160);
     return () => clearTimeout(t);
   }, [word]);
@@ -93,7 +98,8 @@ export default function QuickCapture() {
 
   const add = async () => {
     const r = resolved;
-    if (!r?.word || busy) return;
+    // 即使未来有新的异步入口，也绝不按与输入框不一致的解析结果入库。
+    if (!r?.word || r.word !== cleanWord(word) || busy) return;
     setBusy(true);
     try {
       if (r.inDecks.includes(deck)) {

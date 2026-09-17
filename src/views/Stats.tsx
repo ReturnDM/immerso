@@ -83,7 +83,7 @@ function Ring({ p, done, total }: { p: number; done: number; total: number }) {
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
         <span className="num text-3xl font-light t1 tabular-nums">{done}</span>
-        <span className="text-xs t3">/ {total} 次</span>
+        <span className="text-xs t3">/ {total} 词</span>
       </div>
     </div>
   );
@@ -131,7 +131,7 @@ export default function Stats({ onBack }: { onBack: () => void }) {
           <div className="text-sm t2 space-y-2.5">
             <p>今日进度 {Math.round(p * 100)}%</p>
             <p className="t3 text-[13px]">
-              还剩 {remaining} 次 · 词库 {library} 张卡
+              还剩 {remaining} 词 · 词库 {library} 张卡
             </p>
           </div>
         </div>

@@ -339,7 +339,10 @@ export async function getTodayStats(deck: string): Promise<TodayStats> {
     db,
     // reviewed_at 是 SQLite datetime('now','localtime') 格式，阈值同格式才能正确比较
     // （JS 的 UTC ISO 与它做字典序比较只在东八区碰巧正确）
-    "SELECT COUNT(*) n FROM reviews WHERE reviewed_at >= datetime('now', 'localtime', 'start of day')",
+    // 同一张卡的 Again 重试会有多条记录，进度应按卡计一次；并且应跟随当前词书筛选。
+    `SELECT COUNT(DISTINCT c.id) n FROM reviews r JOIN cards c ON c.id = r.card_id
+     WHERE r.reviewed_at >= datetime('now', 'localtime', 'start of day')${dc}`,
+    dp,
   );
   const library = await count(
     db,

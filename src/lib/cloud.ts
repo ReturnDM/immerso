@@ -75,8 +75,21 @@ async function fetchGist(token: string, id: string): Promise<Backup | null> {
   }
 }
 
-/** 云同步主流程；返回报告文本 */
-export async function cloudSync(): Promise<string> {
+// 同一应用内的自动同步、手动同步和复习结束同步可能重叠。
+// 将它们合并到同一条任务，避免同时读到旧 gist id 后各自创建/覆盖一个 Gist。
+let cloudSyncTask: Promise<string> | null = null;
+
+/** 云同步主流程；同一时刻的调用复用同一次同步。 */
+export function cloudSync(): Promise<string> {
+  if (cloudSyncTask) return cloudSyncTask;
+  const task = cloudSyncInner().finally(() => {
+    if (cloudSyncTask === task) cloudSyncTask = null;
+  });
+  cloudSyncTask = task;
+  return task;
+}
+
+async function cloudSyncInner(): Promise<string> {
   const token = await getGhToken();
   if (!token) throw new Error("尚未配置 GitHub Token");
 
@@ -119,9 +132,17 @@ export async function cloudSync(): Promise<string> {
 /** 从用户输入解析 Gist ID：完整 URL、裸 ID 均可；不合法返回 null */
 export function parseGistId(input: string): string | null {
   const s = input.trim();
-  const fromUrl = s.match(/gist\.github\.com\/(?:g\/)?([\da-zA-Z]+)\/?$/);
-  const id = fromUrl ? fromUrl[1] : s;
-  return /^[\da-zA-Z]{16,64}$/.test(id) ? id : null;
+  const validId = /^[\da-zA-Z]{16,64}$/;
+  if (validId.test(s)) return s;
+  try {
+    const url = new URL(s);
+    if (url.protocol !== "https:" || url.hostname !== "gist.github.com") return null;
+    const parts = url.pathname.split("/").filter(Boolean);
+    const id = parts.length === 1 ? parts[0] : parts.length === 2 ? parts[1] : null;
+    return id && validId.test(id) ? id : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -138,8 +159,20 @@ export async function adoptGist(input: string): Promise<string> {
   if (remote.app !== "immerso" || !Array.isArray(remote.cards)) {
     throw new Error("该 Gist 存在，但内容不是浸词备份");
   }
-  await setSetting("cloud_gist_id", id);
-  return `✓ 已接入 ${id.slice(0, 8)}… 的云端 · ${await cloudSync()}`;
+  // 接入必须排在当前同步之后，再切换目标并完整执行一次新目标的同步。
+  // 否则 cloudSync() 会复用旧任务，让界面报成功但新 Gist 从未合并。
+  const previous = cloudSyncTask;
+  const task = (previous ?? Promise.resolve(""))
+    .catch(() => "")
+    .then(async () => {
+      await setSetting("cloud_gist_id", id);
+      return cloudSyncInner();
+    })
+    .finally(() => {
+      if (cloudSyncTask === task) cloudSyncTask = null;
+    });
+  cloudSyncTask = task;
+  return `✓ 已接入 ${id.slice(0, 8)}… 的云端 · ${await task}`;
 }
 
 /** 自动同步：已配置且未关闭时执行，返回状态文本（错误也以文本返回，不打扰界面） */

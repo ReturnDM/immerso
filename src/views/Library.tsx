@@ -40,27 +40,39 @@ export default function Library({ onBack }: { onBack: () => void }) {
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
+  const listGeneration = useRef(0);
+  const activeListKey = useRef("");
+  const loadedListKey = useRef<string | null>(null);
+  activeListKey.current = JSON.stringify([deck, filter, q]);
 
   /** 追加一页；page 0 = 重置列表（筛选条件变化时走这里） */
   const load = useCallback(
     async (d: string, f: LibFilter, query: string, pg: number) => {
+      const key = JSON.stringify([d, f, query]);
+      if (key !== activeListKey.current) return;
+      if (pg > 0 && loadedListKey.current !== key) return;
+      const generation = pg === 0 ? ++listGeneration.current : listGeneration.current;
+      if (pg === 0) loadedListKey.current = null;
       setLoading(true);
       try {
         const rows = await getLibrary(d, f, query, pg);
+        if (key !== activeListKey.current || generation !== listGeneration.current) return;
         setCards((cs) => (pg === 0 ? rows : [...cs, ...rows]));
+        if (pg === 0) loadedListKey.current = key;
         setHasMore(rows.length === LIB_PAGE_SIZE);
         setPage(pg);
-        void getWordDecks(rows.map((r) => r.word)).then((m) =>
-          pg === 0
-            ? setDecksByWord(m)
-            : setDecksByWord((prev) => {
-                const next = new Map(prev);
-                for (const [k, v] of m) next.set(k, v);
-                return next;
-              }),
-        );
+        const m = await getWordDecks(rows.map((r) => r.word));
+        if (key !== activeListKey.current || generation !== listGeneration.current) return;
+        if (pg === 0) setDecksByWord(m);
+        else setDecksByWord((prev) => {
+          const next = new Map(prev);
+          for (const [k, v] of m) next.set(k, v);
+          return next;
+        });
       } finally {
-        setLoading(false);
+        if (key === activeListKey.current && generation === listGeneration.current) {
+          setLoading(false);
+        }
       }
     },
     [],

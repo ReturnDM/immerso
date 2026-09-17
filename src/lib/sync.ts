@@ -139,7 +139,11 @@ export async function mergeIntoLocal(data: Backup): Promise<string> {
       await db.execute("DELETE FROM cards WHERE id = ?", [local.id]);
       deletedWords++;
     }
-    if (!tombstones.has(key)) {
+    // 墓碑是带版本的删除指令：同一词以较晚的删除时间为准。
+    // 不能只在本机不存在时插入，否则较早的本机墓碑会覆盖远端较新的
+    // 删除，下一次导出时又把旧时间传回去，给旧卡留下复活窗口。
+    const localTomb = tombstones.get(key);
+    if (!localTomb || t.deleted_at > localTomb) {
       await db.execute("INSERT OR REPLACE INTO tombstones (word, deleted_at) VALUES (?, ?)", [
         t.word,
         t.deleted_at,
@@ -224,9 +228,9 @@ export async function mergeIntoLocal(data: Backup): Promise<string> {
     if (existing.length === 0) {
       const sourceId = await ensureSource(c);
       await db.execute(
-        `INSERT INTO cards (word, deck, state, stability, difficulty, due, last_review, reps, lapses, step, suspended)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(word) DO NOTHING`,
-        [c.word, c.deck || "生词本", c.state, c.stability, c.difficulty, c.due, c.last_review, c.reps, c.lapses, c.step, c.suspended],
+        `INSERT INTO cards (word, deck, state, stability, difficulty, due, last_review, reps, lapses, step, suspended, added_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,COALESCE(?, datetime('now','localtime'))) ON CONFLICT(word) DO NOTHING`,
+        [c.word, c.deck || "生词本", c.state, c.stability, c.difficulty, c.due, c.last_review, c.reps, c.lapses, c.step, c.suspended, c.added_at ?? null],
       );
       if (sourceId !== null) {
         await db.execute("UPDATE cards SET source_id = ? WHERE word = ? COLLATE NOCASE", [sourceId, c.word]);

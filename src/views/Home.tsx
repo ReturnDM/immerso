@@ -113,7 +113,7 @@ export default function Home({ onStart, onSearch, onSettings, onStats, onLibrary
               {stats === null ? "载入中…" : stats.library === 0 ? "词库是空的" : "今日已完成"}
             </p>
             {stats !== null && stats.library > 0 && (
-              <p className="mt-2 text-[13px] t3">学了 {stats.doneToday} 次 · 明天见</p>
+              <p className="mt-2 text-[13px] t3">学了 {stats.doneToday} 词 · 明天见</p>
             )}
           </>
         )}

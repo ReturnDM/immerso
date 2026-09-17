@@ -135,6 +135,9 @@ export default function Review({ onExit }: { onExit: () => void }) {
   const schedulingRef = useRef<Record<Grade, RecordLogItem> | null>(null);
   const autoGrade = useRef<Grade | null>(null);
   const shownAt = useRef(Date.now());
+  // 评分写库期间锁住当前队列项；键盘连发和快速连点都不能重复记一张卡。
+  const gradingItem = useRef<QueueItem | null>(null);
+  const [grading, setGrading] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -156,6 +159,12 @@ export default function Review({ onExit }: { onExit: () => void }) {
   }, []);
 
   const item = queue?.[idx];
+
+  // 题目推进到下一项（包括忘记后重新入队）后才解除锁。
+  useEffect(() => {
+    gradingItem.current = null;
+    setGrading(false);
+  }, [item]);
   // 模式序列：插回的续练卡（含忘记重试）以 resume 断点为准，其余惰性构建
   const seqState = useMemo(() => {
     if (!item || !modes) return null;
@@ -273,13 +282,17 @@ export default function Review({ onExit }: { onExit: () => void }) {
 
   const grade = useCallback(
     async (g: Grade, presched?: RecordLogItem) => {
-      if (!item || !revealed) return;
+      if (!item || !revealed || gradingItem.current === item) return;
       const sched = presched ?? schedulingRef.current?.[g];
       if (!sched) return;
+      gradingItem.current = item;
+      setGrading(true);
       try {
         await applyReview(item, g, sched, Date.now() - shownAt.current);
       } catch (e) {
         setBug(String(e));
+        gradingItem.current = null;
+        setGrading(false);
         return;
       }
       // 忘记 → 本轮内重现：只重做失败的最后一轮（已过的模式不再重来），隔 3~5 张
@@ -769,7 +782,8 @@ export default function Review({ onExit }: { onExit: () => void }) {
           <div className="mx-auto max-w-xs">
             <button
               onClick={() => autoGrade.current !== null && void grade(autoGrade.current)}
-              className="btn-ink w-full rounded-md px-2 py-3 text-sm"
+              disabled={grading}
+              className="btn-ink w-full rounded-md px-2 py-3 text-sm disabled:opacity-40"
             >
               继续 · 评「{GRADE_LABEL[autoGrade.current]}」
               <span className="opacity-50 text-xs ml-2 num">空格 / Enter</span>
@@ -796,7 +810,8 @@ export default function Review({ onExit }: { onExit: () => void }) {
                 <button
                   key={g}
                   onClick={() => void grade(g)}
-                  className="rounded-md px-2 py-3 transition-colors hover:bg-[var(--hover)] active:scale-[0.97]"
+                  disabled={grading}
+                  className="rounded-md px-2 py-3 transition-colors hover:bg-[var(--hover)] active:scale-[0.97] disabled:opacity-40"
                 >
                   <span className="flex items-baseline justify-center gap-2">
                     <span className="num text-xs t4">{i + 1}</span>

@@ -48,6 +48,9 @@ export default function Search({ onBack }: { onBack: () => void }) {
   }, []);
 
   useEffect(() => {
+    // 每一次输入变化都立即作废在途查询；仅在防抖回调中递增会让“清空输入”
+    // 无法拦住已经发出的旧请求。
+    const id = ++reqRef.current;
     const q = query.trim();
     if (!q) {
       setEntries(null);
@@ -55,7 +58,6 @@ export default function Search({ onBack }: { onBack: () => void }) {
       return;
     }
     const t = setTimeout(() => {
-      const id = ++reqRef.current;
       lookup(q)
         .then((rows) => {
           if (id !== reqRef.current) return; // 旧响应晚到，丢弃
