@@ -23,6 +23,7 @@ export default function Home({ onStart, onSearch, onSettings, onStats, onLibrary
   const [deck, setDeck] = useState("全部");
   const [deckList, setDeckList] = useState<{ name: string; total?: number }[]>([]);
   const [cloudStatus, setCloudStatus] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -36,9 +37,16 @@ export default function Home({ onStart, onSearch, onSettings, onStats, onLibrary
         console.error(e);
         setStats({ reviewCount: 0, newCount: 0, total: 0, doneToday: 0, library: 0 });
       }
-      // 后台自动云同步（未配置则静默跳过）
-      const s = await maybeAutoSync();
-      if (s) setCloudStatus(s.includes("✓") ? s.replace("✓ ", "") : s);
+      // 后台自动云同步（未配置则静默跳过）。大库 + 慢网要几十秒，超过 400ms 才提示
+      // 「同步中」，免得没配同步的用户每次进主页都闪一下
+      const hint = setTimeout(() => setSyncing(true), 400);
+      try {
+        const s = await maybeAutoSync();
+        if (s) setCloudStatus(s.includes("✓") ? s.replace("✓ ", "") : s);
+      } finally {
+        clearTimeout(hint);
+        setSyncing(false);
+      }
     })();
   }, []);
 
@@ -122,7 +130,11 @@ export default function Home({ onStart, onSearch, onSettings, onStats, onLibrary
       <div className="w-full max-w-2xl self-center flex items-center text-xs t4 select-none">
         <DeckPicker options={pickerOptions} value={deck} onChange={(d) => void pickDeck(d)} />
         {stats && <span className="num ml-3">{stats.library} 张卡</span>}
-        {cloudStatus && <span className="ml-3 truncate max-w-[280px]">{cloudStatus}</span>}
+        {syncing ? (
+          <span className="ml-3 truncate max-w-[280px]">同步中…</span>
+        ) : (
+          cloudStatus && <span className="ml-3 truncate max-w-[280px]">{cloudStatus}</span>
+        )}
         <span className="ml-auto">ECDICT · FSRS-5</span>
       </div>
     </div>

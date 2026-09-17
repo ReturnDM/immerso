@@ -38,7 +38,8 @@ export default function App() {
     })();
   }, []);
 
-  // 划词直加热键：单词/短语直入词书并通知；选中整句（≥3 词）则呼出小窗，句子自动进原句栏
+  // 划词直加热键：单词/短语直入词书并通知；选中整句（≥3 词）则呼出小窗，
+  // 句子经 open_quick 的 text 参数交接给小窗原句栏（剪贴板已还原，读不到了）
   useEffect(() => {
     const un = listen("quick-direct", () => {
       void (async () => {
@@ -46,7 +47,7 @@ export default function App() {
           const raw = await invoke<string>("capture_selected");
           const words = raw.trim().split(/\s+/).filter(Boolean).length;
           if (words >= 3) {
-            await invoke("open_quick");
+            await invoke("open_quick", { text: raw });
           } else {
             notify(await directCapture(raw));
           }

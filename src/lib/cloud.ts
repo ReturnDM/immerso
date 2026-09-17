@@ -175,11 +175,19 @@ export async function adoptGist(input: string): Promise<string> {
   return `✓ 已接入 ${id.slice(0, 8)}… 的云端 · ${await task}`;
 }
 
-/** 自动同步：已配置且未关闭时执行，返回状态文本（错误也以文本返回，不打扰界面） */
+/** 自动同步：已配置且未关闭时执行，返回状态文本（错误也以文本返回，不打扰界面）。
+ *  带节流：主页每次重新挂载都会调到这里，不节流的话「设置 → 首页」往返一次
+ *  就是一整趟 GitHub 拉取+合并+全量推回（备份近 1MB）。设置页手动同步不受影响。
+ */
+const AUTO_SYNC_THROTTLE_MS = 5 * 60 * 1000;
+let lastAutoSyncAt = 0;
+
 export async function maybeAutoSync(): Promise<string | null> {
   const token = await getGhToken();
   if (!token) return null;
   if ((await getSetting("auto_cloud_sync")) === "off") return null;
+  if (Date.now() - lastAutoSyncAt < AUTO_SYNC_THROTTLE_MS) return null;
+  lastAutoSyncAt = Date.now();
   try {
     return await cloudSync();
   } catch (e) {

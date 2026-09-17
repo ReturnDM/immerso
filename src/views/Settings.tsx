@@ -176,21 +176,27 @@ export default function Settings({ onBack }: { onBack: () => void }) {
   }, []);
 
   const changeHotkey = async (kind: "direct" | "popup", v: string) => {
-    const nextDirect = kind === "direct" ? v : hotkeyDirect;
-    const nextPopup = kind === "popup" ? v : hotkeyPopup;
+    const prevDirect = hotkeyDirect;
+    const prevPopup = hotkeyPopup;
+    const nextDirect = kind === "direct" ? v : prevDirect;
+    const nextPopup = kind === "popup" ? v : prevPopup;
     setHotkeyMsg(null);
-    // 先校验再改状态落库，重复键时界面与已存设置保持一致（刷新后不跳变）
+    // 先校验，重复键时界面与已存设置保持一致（刷新后不跳变）
     if (nextDirect && nextPopup && nextDirect === nextPopup) {
       setHotkeyMsg("✗ 两个热键不能相同");
       return;
     }
     if (kind === "direct") setHotkeyDirect(v);
     else setHotkeyPopup(v);
-    await setSetting(kind === "direct" ? "hotkey_direct" : "hotkey_popup", v);
     try {
+      // 先注册成功再落库：热键被占用时若已持久化，之后每次启动都会注册失败
+      //（后端只能回落默认键），设置页显示的键就与实际生效的不一致了
       await invoke("set_quick_hotkeys", { direct: nextDirect, popup: nextPopup });
+      await setSetting(kind === "direct" ? "hotkey_direct" : "hotkey_popup", v);
     } catch {
-      setHotkeyMsg("✗ 注册失败，热键可能被其他程序占用");
+      if (kind === "direct") setHotkeyDirect(prevDirect);
+      else setHotkeyPopup(prevPopup);
+      setHotkeyMsg("✗ 注册失败，热键可能被其他程序占用，已还原");
     }
   };
 

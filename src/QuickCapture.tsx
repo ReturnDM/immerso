@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { readText } from "@tauri-apps/plugin-clipboard-manager";
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import {
   addCard,
@@ -24,19 +25,34 @@ export default function QuickCapture() {
   const [busy, setBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const lastPrep = useRef(0);
+  const lastHandover = useRef(0);
   const resolveRequest = useRef(0);
 
-  /** 每次呼出：读剪贴板。整句（≥3 词）进原句栏待补单词；单词直接进词条 */
+  /** 每次呼出：优先取划词直加交接的整句，没有才读剪贴板。整句（≥3 词）进原句栏待补单词；单词直接进词条 */
   const prepare = useCallback(async () => {
     // quick-show 事件与焦点事件会接连触发，去重
     if (Date.now() - lastPrep.current < 200) return;
     lastPrep.current = Date.now();
     setStatus(null);
-    let raw = "";
+    let handed: string | null = null;
     try {
-      raw = (await readText()) ?? "";
+      handed = await invoke<string | null>("take_quick_payload");
     } catch {
-      /* 剪贴板可能是图片等非文本 */
+      /* 取不到就回落剪贴板 */
+    }
+    let raw = "";
+    if (handed != null) {
+      raw = handed;
+      lastHandover.current = Date.now();
+    } else {
+      // 呼出连发的焦点/事件会再次走到这里：刚交接过整句的短窗口内不读剪贴板，
+      // 免得用已还原的旧剪贴板把原句栏覆盖掉
+      if (Date.now() - lastHandover.current < 1500) return;
+      try {
+        raw = (await readText()) ?? "";
+      } catch {
+        /* 剪贴板可能是图片等非文本 */
+      }
     }
     const words = raw.trim().split(/\s+/).filter(Boolean);
     if (words.length >= 3) {

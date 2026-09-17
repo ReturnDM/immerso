@@ -1,6 +1,6 @@
 [package]
 name = "immerso"
-version = "1.4.1"
+version = "1.4.2"
 description = "浸词 - 桌面背单词"
 authors = ["ReturnDM"]
 edition = "2021"
@@ -34,6 +34,11 @@ reqwest = "0.12"
 enigo = "0.6.1"
 tauri-plugin-notification = "2.4.0"
 tauri-plugin-single-instance = "2.4.4"
+
+# 模拟 ⌘C 读选区需要「辅助功能」权限，用它查 AXIsProcessTrusted 并弹系统引导框
+# （enigo 内部有同样实现但不对外导出；core-foundation 已由 enigo/tauri 引入，不新增编译量）
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

@@ -1,7 +1,7 @@
 // 数据同步核心：备份收集 + 合并（导入合并与云同步共用）
 // 合并规则：按卡取最新（last_review 新者胜），复习记录按（词,时间,评分）去重补插；
 // 删除走墓碑（tombstones）：合并时据此删词，并抑制删除之前收的旧卡回灌
-import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
+import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { getApp, getTombstones } from "./db";
 
@@ -278,6 +278,7 @@ export async function mergeIntoLocal(data: Backup): Promise<string> {
 }
 
 // ---------- 文件导入/导出（手动兜底） ----------
+// 文件读写走 Rust 命令（对话框返回的任意路径直写），不给前端 fs 权限开全盘读写
 
 export async function exportData(): Promise<string> {
   const backup = await collectBackup();
@@ -288,7 +289,11 @@ export async function exportData(): Promise<string> {
     filters: [{ name: "浸词备份", extensions: ["json"] }],
   });
   if (!path) return "已取消导出";
-  await writeTextFile(path, JSON.stringify(backup));
+  try {
+    await invoke("write_backup_file", { path, content: JSON.stringify(backup) });
+  } catch (e) {
+    return `✗ 写入文件失败：${String(e)}`;
+  }
   return `✓ 已导出 ${backup.cards.length} 张卡 · ${backup.reviews.length} 条复习记录`;
 }
 
@@ -299,7 +304,12 @@ export async function importData(): Promise<string> {
     filters: [{ name: "浸词备份", extensions: ["json"] }],
   });
   if (!path) return "已取消导入";
-  const raw = await readTextFile(path as string);
+  let raw: string;
+  try {
+    raw = await invoke<string>("read_backup_file", { path });
+  } catch (e) {
+    return `✗ 读取文件失败：${String(e)}`;
+  }
   let data: Backup;
   try {
     data = JSON.parse(raw);

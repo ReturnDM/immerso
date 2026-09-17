@@ -1,3 +1,4 @@
+use std::sync::Mutex;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Emitter, Manager};
@@ -114,15 +115,71 @@ CREATE TABLE IF NOT EXISTS deck_removals (
 "#,
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 7,
+            description: "deck_words_case_insensitive_pk",
+            // (word, deck) 主键原本大小写敏感，与全库 COLLATE NOCASE 的读法不一致：
+            // 同词异大小写会插出重复标签（小窗显示「已在：生词本 · 生词本」）。
+            // 重建为 word 按 NOCASE 去重，存量重复行借 INSERT OR IGNORE 收敛
+            sql: r#"
+CREATE TABLE deck_words_ci (
+  word TEXT NOT NULL COLLATE NOCASE,
+  deck TEXT NOT NULL,
+  PRIMARY KEY (word, deck)
+);
+INSERT OR IGNORE INTO deck_words_ci (word, deck) SELECT word, deck FROM deck_words;
+DROP TABLE deck_words;
+ALTER TABLE deck_words_ci RENAME TO deck_words;
+"#,
+            kind: MigrationKind::Up,
+        },
     ]
 }
 
-/// 唤起主窗（托盘左键/菜单、二次启动实例共用）
+/// 唤起主窗（托盘左键/菜单、二次启动实例、macOS Dock 重开共用）
 fn show_main(app: &tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();
+    }
+}
+
+/// macOS 辅助功能权限：模拟 ⌘C 读取选区的前提。
+/// 没授权时 CGEvent 会被系统直接丢弃且不报错，剪贴板读到的还是用户上一次的内容
+/// ——不检查就会把无关的词静默收进词书，所以模拟前必须先判断。
+#[cfg(target_os = "macos")]
+mod accessibility {
+    use core_foundation::base::TCFType;
+    use core_foundation::boolean::CFBoolean;
+    use core_foundation::dictionary::{CFDictionary, CFDictionaryRef};
+    use core_foundation::string::{CFString, CFStringRef};
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    #[link(name = "ApplicationServices", kind = "framework")]
+    extern "C" {
+        fn AXIsProcessTrusted() -> bool;
+        fn AXIsProcessTrustedWithOptions(options: CFDictionaryRef) -> bool;
+        static kAXTrustedCheckOptionPrompt: CFStringRef;
+    }
+
+    static PROMPTED: AtomicBool = AtomicBool::new(false);
+
+    pub fn trusted() -> bool {
+        unsafe { AXIsProcessTrusted() }
+    }
+
+    /// 弹系统引导框：把本应用加进「辅助功能」列表并给出跳转按钮。
+    /// 每次运行只弹一次——已拒绝过的用户系统不会再弹，重复调用只会多一次 XPC 往返
+    pub fn prompt_once() {
+        if PROMPTED.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        unsafe {
+            let key = CFString::wrap_under_get_rule(kAXTrustedCheckOptionPrompt);
+            let opts = CFDictionary::from_CFType_pairs(&[(key, CFBoolean::true_value())]);
+            let _ = AXIsProcessTrustedWithOptions(opts.as_concrete_TypeRef());
+        }
     }
 }
 
@@ -141,14 +198,35 @@ fn toggle_quick(app: &tauri::AppHandle) {
     build_quick(app);
 }
 
-/// 显示（或首次创建）快速收词小窗；划词直加遇到整句时由前端调用，把句子带入原句栏
+/// 划词直加选中整句（≥3 词）时分流给小窗的文本。capture_selected 完成前就把用户
+/// 旧剪贴板还原了，小窗再读剪贴板只能读到旧内容——句子只能经这里交接，
+/// 由小窗挂载/呼出时经 take_quick_payload 取走（取走即清）
+static QUICK_PAYLOAD: Mutex<Option<String>> = Mutex::new(None);
+
+fn stash_quick_payload(text: Option<String>) {
+    if let Some(t) = text {
+        if let Ok(mut g) = QUICK_PAYLOAD.lock() {
+            *g = Some(t);
+        }
+    }
+}
+
+/// 显示（或首次创建）快速收词小窗；划词直加遇到整句时由前端调用，
+/// text 为捕获到的选中文本，暂存后由小窗取走填进原句栏
 #[tauri::command]
-fn open_quick(app: tauri::AppHandle) {
+fn open_quick(app: tauri::AppHandle, text: Option<String>) {
+    stash_quick_payload(text);
     if let Some(w) = app.get_webview_window("quick") {
         show_quick(&app, &w);
         return;
     }
     build_quick(&app);
+}
+
+/// 小窗取走暂存的整句（无则返回 null，小窗回落读剪贴板）
+#[tauri::command]
+fn take_quick_payload() -> Option<String> {
+    QUICK_PAYLOAD.lock().ok().and_then(|mut g| g.take())
 }
 
 fn show_quick(_app: &tauri::AppHandle, w: &tauri::WebviewWindow) {
@@ -188,14 +266,13 @@ fn direct_capture(app: &tauri::AppHandle) {
     }
 }
 
-/// 注册两个热键（None = 关闭该热键）；改键时先全部注销再重挂
-fn register_hotkeys(
+/// 往（已清空的）热键表上挂一组热键；None = 不挂该热键
+fn apply_hotkeys(
     app: &tauri::AppHandle,
     direct: Option<&str>,
     popup: Option<&str>,
 ) -> Result<(), String> {
     let gs = app.global_shortcut();
-    gs.unregister_all().map_err(|e| e.to_string())?;
     if let Some(acc) = popup {
         gs.on_shortcut(acc, |app, _s, event| {
             if event.state() == ShortcutState::Pressed {
@@ -215,6 +292,26 @@ fn register_hotkeys(
     Ok(())
 }
 
+/// 注册两个热键（None = 关闭该热键）；改键时先全部注销再重挂。
+/// 任意一键挂载失败（如被其他程序占用）时回落默认键——注销在前又不兜底，
+/// 会留下「两个热键全灭且无提示」的空窗，后台常驻场景等于功能整体失联
+fn register_hotkeys(
+    app: &tauri::AppHandle,
+    direct: Option<&str>,
+    popup: Option<&str>,
+) -> Result<(), String> {
+    let gs = app.global_shortcut();
+    gs.unregister_all().map_err(|e| e.to_string())?;
+    match apply_hotkeys(app, direct, popup) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let _ = gs.unregister_all();
+            let _ = apply_hotkeys(app, Some("alt+q"), Some("alt+e"));
+            Err(e)
+        }
+    }
+}
+
 /// 设置页改热键后由前端调用：同时重挂两个热键；None/空串 = 关闭
 #[tauri::command]
 fn set_quick_hotkeys(
@@ -227,13 +324,51 @@ fn set_quick_hotkeys(
     register_hotkeys(&app, d, p)
 }
 
-/// 模拟 Ctrl+C（macOS 为 ⌘C）复制当前选中文本并读取；先记旧剪贴板，复制完还原，不破坏用户剪贴板
+/// 剪贴板版本号（Windows）。序号不变 = 目标应用没把选区写进剪贴板
+/// （未响应/无选区/权限被拒），此时读到的只会是用户旧剪贴板——
+/// 不判定就会把无关内容当成选中的词收进词书。
+/// macOS 拿 changeCount 需要引入 objc2-app-kit 新依赖（拉不动 crates.io，暂缓），
+/// 退回「读到的文本与旧剪贴板不同」判定，见 capture_selected
+#[cfg(target_os = "windows")]
+fn clipboard_seq() -> usize {
+    #[link(name = "user32")]
+    extern "C" {
+        fn GetClipboardSequenceNumber() -> u32;
+    }
+    unsafe { GetClipboardSequenceNumber() as usize }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn clipboard_seq() -> usize {
+    0
+}
+
+/// 模拟 Ctrl+C（macOS 为 ⌘C）复制当前选中文本并读取；先记旧剪贴板（含图片），
+/// 复制完还原，不破坏用户剪贴板
 #[tauri::command]
 async fn capture_selected(app: tauri::AppHandle) -> Result<String, String> {
+    // macOS 没有辅助功能权限时，下面的 ⌘C 会被系统丢掉，剪贴板里剩的是用户上一次复制的内容，
+    // 直接返回就会把无关的词收进词书——这里先拦住，并借系统引导框把用户领到设置页
+    #[cfg(target_os = "macos")]
+    if !accessibility::trusted() {
+        let _ = app.run_on_main_thread(accessibility::prompt_once);
+        return Err(
+            "缺少「辅助功能」权限，读不到选中文本：系统设置 → 隐私与安全性 → 辅助功能，勾选 immerso 后再试"
+                .into(),
+        );
+    }
     tauri::async_runtime::spawn_blocking(move || {
         use enigo::{Direction, Enigo, Key, Keyboard, Settings};
         use tauri_plugin_clipboard_manager::ClipboardExt;
-        let old = app.clipboard().read_text().ok();
+
+        // Windows 能查剪贴板序号；macOS 只能比对内容
+        let seq_supported = cfg!(target_os = "windows");
+
+        // 复制前快照：序号（判定复制是否发生）+ 旧内容（文本/图片，事后还原）
+        let seq_before = clipboard_seq();
+        let old_text = app.clipboard().read_text().ok();
+        let old_image = app.clipboard().read_image().ok();
+
         let mut enigo = Enigo::new(&Settings::default()).map_err(|e| e.to_string())?;
         #[cfg(target_os = "macos")]
         let (modifier, copy) = (Key::Meta, Key::Unicode('c'));
@@ -242,14 +377,47 @@ async fn capture_selected(app: tauri::AppHandle) -> Result<String, String> {
         enigo.key(modifier, Direction::Press).map_err(|e| e.to_string())?;
         enigo.key(copy, Direction::Click).map_err(|e| e.to_string())?;
         enigo.key(modifier, Direction::Release).map_err(|e| e.to_string())?;
-        std::thread::sleep(std::time::Duration::from_millis(180));
-        let text = app.clipboard().read_text().map_err(|e| e.to_string())?;
-        if let Some(old) = old {
-            if old != text {
-                let _ = app.clipboard().write_text(&old);
+
+        // 等目标应用把选区写进剪贴板。固定睡 180ms 的老做法在应用响应慢或
+        // 忽略 ⌘C 时会把旧剪贴板误当选区；没等到新内容就明确报错，宁可不收也不错收
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(900);
+        let mut text: Option<String> = None;
+        while text.is_none() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(30));
+            if seq_supported {
+                // 序号变了才算复制发生（内容与旧剪贴板相同也能识别），变了再稍等
+                // 一拍：有的应用分多步写剪贴板格式，立刻读可能读不到
+                if clipboard_seq() != seq_before {
+                    std::thread::sleep(std::time::Duration::from_millis(40));
+                    text = app
+                        .clipboard()
+                        .read_text()
+                        .ok()
+                        .filter(|t| !t.is_empty());
+                }
+            } else {
+                // 以「读到的文本与旧剪贴板不同」为准。盲区：选中文本恰好与旧剪贴板
+                // 相同时无法与「复制失败」区分，按没读到处理
+                match app.clipboard().read_text() {
+                    Ok(t) if !t.is_empty() && Some(&t) != old_text.as_ref() => text = Some(t),
+                    _ => {}
+                }
             }
         }
-        Ok(text)
+
+        // 复制确实发生过后才需要还原（没发生则剪贴板原样未动）
+        if text.is_some() || (seq_supported && clipboard_seq() != seq_before) {
+            // 图片优先：剪贴板原本是截图等图片时，被文字覆盖就还原不回来了
+            if let Some(img) = old_image.as_ref() {
+                let _ = app.clipboard().write_image(img);
+            } else if let Some(old) = old_text.as_ref() {
+                if Some(old) != text.as_ref() {
+                    let _ = app.clipboard().write_text(old);
+                }
+            }
+        }
+
+        text.ok_or_else(|| "没读到选中文本（应用可能未响应复制，或选区不是文本）".into())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -299,6 +467,19 @@ async fn gist_http(
     Ok((status, text))
 }
 
+/// 导出备份到用户在保存对话框选定的路径。放 Rust 侧直写文件，
+/// 省得为「任意导出路径」给前端 fs 权限开全盘写
+#[tauri::command]
+fn write_backup_file(path: String, content: String) -> Result<(), String> {
+    std::fs::write(&path, content).map_err(|e| e.to_string())
+}
+
+/// 读取用户在打开对话框选定的备份文件
+#[tauri::command]
+fn read_backup_file(path: String) -> Result<String, String> {
+    std::fs::read_to_string(&path).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -323,7 +504,10 @@ pub fn run() {
             set_quick_hotkeys,
             capture_selected,
             open_quick,
-            gist_http
+            take_quick_payload,
+            gist_http,
+            write_backup_file,
+            read_backup_file
         ])
         // 关闭主窗 = 缩到托盘后台（热键照常可用）；退出走托盘菜单或 Cmd+Q。
         // 隐藏不走关闭流程，窗口位置/大小在这里显式落盘
@@ -340,6 +524,7 @@ pub fn run() {
             }
         })
         .setup(|app| {
+
             // 系统托盘：驻留后台的常驻入口
             let show_item = MenuItem::with_id(app, "tray-show", "显示浸词", true, None::<&str>)?;
             let quick_item = MenuItem::with_id(app, "tray-quick", "快速收词", true, None::<&str>)?;
@@ -395,6 +580,25 @@ pub fn run() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // macOS：主窗收进托盘后再点 Dock 图标（或 Finder 里重新打开），系统只发 Reopen。
+            // tao 在没有可见窗口时返回 false 且不代为显示，不处理的话就是「点了没反应」。
+            // 判断主窗自身可见性而非 has_visible_windows——小窗可见而主窗隐藏时 Dock 也应唤起主窗
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = event {
+                let main_hidden = app
+                    .get_webview_window("main")
+                    .map(|w| !w.is_visible().unwrap_or(true))
+                    .unwrap_or(false);
+                if main_hidden {
+                    show_main(app);
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                let _ = (app, event);
+            }
+        });
 }
