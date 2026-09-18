@@ -37,11 +37,13 @@ tauri-plugin-single-instance = "2.4.4"
 
 # 模拟 ⌘C 读选区需要「辅助功能」权限，用它查 AXIsProcessTrusted 并弹系统引导框
 # （enigo 内部有同样实现但不对外导出；core-foundation 已由 enigo/tauri 引入，不新增编译量）
-# objc2-app-kit 读 NSPasteboard.changeCount，判定模拟复制是否真的写入剪贴板
-# （已由 wry/tao 作为传递依赖引入，只开 NSPasteboard 特性，不新增编译量）
+# objc2-app-kit 读 NSPasteboard.changeCount，判定模拟复制是否真的写入剪贴板；
+# NSWindow 给快速收词小窗设 CanJoinAllSpaces + FullScreenAuxiliary（穿透其他 App 的全屏空间）。
+# tauri 自身已按同版本引入 objc2/objc2-app-kit(NSWindow)，这里只是解锁使用，不新增编译量
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10"
-objc2-app-kit = { version = "0.3", features = ["NSPasteboard"] }
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSPasteboard", "NSWindow"] }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

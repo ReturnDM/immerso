@@ -2191,6 +2191,7 @@ version = "1.4.2"
 dependencies = [
  "core-foundation 0.10.1",
  "enigo",
+ "objc2",
  "objc2-app-kit",
  "reqwest 0.12.28",
  "serde",

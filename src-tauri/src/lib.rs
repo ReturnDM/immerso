@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -190,6 +191,7 @@ fn toggle_quick(app: &tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("quick") {
         if w.is_visible().unwrap_or(false) {
             let _ = w.hide();
+            restore_main_after_quick(app);
             return;
         }
         show_quick(app, &w);
@@ -229,14 +231,117 @@ fn take_quick_payload() -> Option<String> {
     QUICK_PAYLOAD.lock().ok().and_then(|mut g| g.take())
 }
 
-fn show_quick(_app: &tauri::AppHandle, w: &tauri::WebviewWindow) {
-    let _ = w.center();
+/// 主窗可见时，小窗的两处「抢戏」都来自它：呼出小窗要激活应用，macOS 激活瞬间
+/// 会切到应用可见窗口所在的 Space——主窗在桌面 Space，别的 App 全屏时用户就被
+/// 拽回桌面；小窗收起后，前台应用只剩主窗可见，系统又把它顶到最前。
+/// 因此呼出期间先把主窗藏起来（仅 macOS，Windows 弹窗不依赖 Space 切换，
+/// 主窗不碍事，维持原行为），收起时再「被动」放回
+static MAIN_HIDDEN_FOR_QUICK: AtomicBool = AtomicBool::new(false);
+
+#[cfg(target_os = "macos")]
+fn stash_main_for_quick(app: &tauri::AppHandle) {
+    if let Some(main) = app.get_webview_window("main") {
+        if main.is_visible().unwrap_or(false) {
+            let _ = main.hide();
+            MAIN_HIDDEN_FOR_QUICK.store(true, Ordering::SeqCst);
+        }
+    }
+}
+
+/// 小窗收起（收词完成 / Esc / 失焦 / 再按热键）后调用：放回为主窗让路时藏掉的主窗
+fn restore_main_after_quick(app: &tauri::AppHandle) {
+    if !MAIN_HIDDEN_FOR_QUICK.swap(false, Ordering::SeqCst) {
+        return;
+    }
+    if let Some(main) = app.get_webview_window("main") {
+        #[cfg(target_os = "macos")]
+        macos_order_front_no_focus(&main);
+        #[cfg(not(target_os = "macos"))]
+        let _ = main.show();
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_order_front_no_focus(w: &tauri::WebviewWindow) {
+    use objc2::rc::Retained;
+    use objc2_app_kit::NSWindow;
+    let Ok(ptr) = w.ns_window() else {
+        return;
+    };
+    unsafe {
+        if let Some(ns) = Retained::retain(ptr as *mut NSWindow) {
+            // 不用 makeKeyAndOrderFront：它会激活应用，收词后把用户拽离当前全屏/前台 App
+            ns.orderFront(None);
+        }
+    }
+}
+
+/// 小窗落在鼠标所在屏居中。NSWindow.center 只认主屏，多屏或全屏 App 在副屏时
+/// 小窗会跑到别的屏幕去；拿不到鼠标位置时回落 center()
+fn center_quick_on_cursor(app: &tauri::AppHandle, w: &tauri::WebviewWindow) {
+    use tauri::PhysicalPosition;
+    let centered = (|| -> Option<()> {
+        let cursor = app.cursor_position().ok()?;
+        let mon = w.monitor_from_point(cursor.x, cursor.y).ok()??;
+        let ws = w.outer_size().ok()?;
+        let (mp, ms) = (mon.position(), mon.size());
+        let pos = PhysicalPosition::new(
+            mp.x + (ms.width as i32 - ws.width as i32).max(0) / 2,
+            mp.y + (ms.height as i32 - ws.height as i32).max(0) / 2,
+        );
+        w.set_position(pos).ok()?;
+        Some(())
+    })();
+    if centered.is_none() {
+        let _ = w.center();
+    }
+}
+
+fn show_quick(app: &tauri::AppHandle, w: &tauri::WebviewWindow) {
+    #[cfg(target_os = "macos")]
+    {
+        // 每次呼出都补设一次，兜住任何把集合行为洗掉的路径
+        macos_join_all_spaces(w);
+        stash_main_for_quick(app);
+    }
+    center_quick_on_cursor(app, w);
     let _ = w.show();
     let _ = w.set_focus();
     let _ = w.emit("quick-show", ());
 }
 
+/// 前端每次收起小窗后调用（对应前端 quickWin.hide() 的所有路径）
+#[tauri::command]
+fn quick_hidden(app: tauri::AppHandle) {
+    restore_main_after_quick(&app);
+}
+
+/// 其他 App 原生全屏时小窗被挡在全屏 Space 外，show + set_focus 也召不到上层。
+/// 给小窗补 CanJoinAllSpaces + FullScreenAuxiliary（Bob/PopClip 类悬浮取词窗的标准做法，
+/// tao 的 set_visible_on_all_workspaces 只设前者，缺 Auxiliary 仍穿不进全屏空间）；
+/// 置于全屏 App 之上靠 always_on_top 的悬浮层级。AppKit 须在主线程调——build_quick
+/// 的调用方（setup、托盘、热键、WKWebView IPC 上的同步命令）都在主线程
+#[cfg(target_os = "macos")]
+fn macos_join_all_spaces(w: &tauri::WebviewWindow) {
+    use objc2::rc::Retained;
+    use objc2_app_kit::{NSWindow, NSWindowCollectionBehavior};
+    let Ok(ptr) = w.ns_window() else {
+        return;
+    };
+    unsafe {
+        if let Some(ns) = Retained::retain(ptr as *mut NSWindow) {
+            let mut behavior = ns.collectionBehavior();
+            behavior |= NSWindowCollectionBehavior::CanJoinAllSpaces
+                | NSWindowCollectionBehavior::FullScreenAuxiliary;
+            ns.setCollectionBehavior(behavior);
+        }
+    }
+}
+
 fn build_quick(app: &tauri::AppHandle) {
+    // 小窗创建即显示，主窗要在 build 前就藏好，别让激活瞬间切走 Space
+    #[cfg(target_os = "macos")]
+    stash_main_for_quick(app);
     let builder = tauri::WebviewWindowBuilder::new(
         app,
         "quick",
@@ -254,6 +359,9 @@ fn build_quick(app: &tauri::AppHandle) {
     // tauri.conf.json macOSPrivateApi），小窗圆角卡片才不会露白底
     let builder = builder.transparent(true);
     let _ = builder.build().map(|w| {
+        // 建好即设集合行为，首次呼出就发生在别的 App 全屏时也能盖上去
+        #[cfg(target_os = "macos")]
+        macos_join_all_spaces(&w);
         let _ = w.set_focus();
         // webview 还没加载完，不 emit quick-show；QuickCapture 挂载时会自取剪贴板
     });
@@ -513,6 +621,7 @@ pub fn run() {
             capture_selected,
             open_quick,
             take_quick_payload,
+            quick_hidden,
             gist_http,
             write_backup_file,
             read_backup_file
