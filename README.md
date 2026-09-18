@@ -47,6 +47,18 @@ node scripts/seed-cards.mjs 30   # 可选：灌 30 个 CET4 高频词试玩
 
 Mac 本地开发需 Xcode Command Line Tools 与 `rustup target add aarch64-apple-darwin x86_64-apple-darwin`。划词直加（模拟 ⌘C 读选中词）依赖**辅助功能权限**：系统设置 → 隐私与安全性 → 辅助功能，勾选浸词（dev 模式下授权给运行它的终端 App）。
 
+### macOS 小窗回归
+
+快速收词采用非激活式 `NSPanel`，可获得键盘焦点并加入全屏空间，不通过激活整个应用或隐藏主窗来呼出。临时小窗不参与窗口状态恢复，避免插件在面板配置前抢先显示和聚焦。实现参考 [Tauri 社区讨论](https://github.com/orgs/tauri-apps/discussions/9876) 与 [tauri-nspanel](https://github.com/ahkohd/tauri-nspanel)。
+
+在有图形桌面的 Mac 上运行原生回归测试（会短暂创建测试窗口，不读写用户词库）：
+
+```bash
+cargo test --manifest-path src-tauri/Cargo.toml --test quick_window_macos --locked
+```
+
+测试覆盖首次显示前的状态恢复、输入焦点、重复呼出/隐藏及主窗显隐保持。发布前还需用实际快捷键检查：其他应用全屏和浸词自身全屏时首次/再次呼出、小窗直接输入、Esc/失焦收起后仍停留原空间，以及副屏全屏时小窗跟随鼠标所在屏幕。
+
 ## 致谢
 
 - 词典数据：[ECDICT](https://github.com/skywind3000/ECDICT)（CC BY-NC 4.0，仅个人学习用途）

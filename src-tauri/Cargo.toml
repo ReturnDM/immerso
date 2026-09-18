@@ -14,6 +14,11 @@ edition = "2021"
 name = "immerso_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[[test]]
+name = "quick_window_macos"
+path = "tests/quick_window_macos.rs"
+harness = false
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -38,12 +43,14 @@ tauri-plugin-single-instance = "2.4.4"
 # 模拟 ⌘C 读选区需要「辅助功能」权限，用它查 AXIsProcessTrusted 并弹系统引导框
 # （enigo 内部有同样实现但不对外导出；core-foundation 已由 enigo/tauri 引入，不新增编译量）
 # objc2-app-kit 读 NSPasteboard.changeCount，判定模拟复制是否真的写入剪贴板；
-# NSWindow 给快速收词小窗设 CanJoinAllSpaces + FullScreenAuxiliary（穿透其他 App 的全屏空间）。
+# NSPanel 让快速收词小窗在其他 App 全屏时获得输入焦点而不激活整个应用。
 # tauri 自身已按同版本引入 objc2/objc2-app-kit(NSWindow)，这里只是解锁使用，不新增编译量
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSPasteboard", "NSWindow"] }
+# 固定已审阅的 v2.1 提交，避免分支更新改变原生窗口行为。
+tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", rev = "c9ec2130422200f0863b23dfdad02b133a529b07" }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

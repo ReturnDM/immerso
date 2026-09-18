@@ -1,10 +1,12 @@
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_sql::{Migration, MigrationKind};
+
+#[cfg(target_os = "macos")]
+mod quick_panel;
 
 const CORE_SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS cards (
@@ -187,11 +189,17 @@ mod accessibility {
 /// 查词小窗热键：呼出 / 收起快速收词小窗。
 /// 小窗惰性创建——Windows 上透明窗体配 visible:false 会被 WebView2 无视（启动即显形），
 /// 所以不在配置里预建，首次按热键时再建，之后复用切换显隐。
-fn toggle_quick(app: &tauri::AppHandle) {
+pub(crate) fn toggle_quick(app: &tauri::AppHandle) {
+    let handle = app.clone();
+    if let Err(e) = app.run_on_main_thread(move || toggle_quick_on_main(&handle)) {
+        eprintln!("呼出快速收词失败: {e}");
+    }
+}
+
+fn toggle_quick_on_main(app: &tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("quick") {
         if w.is_visible().unwrap_or(false) {
             let _ = w.hide();
-            restore_main_after_quick(app);
             return;
         }
         show_quick(app, &w);
@@ -218,62 +226,22 @@ fn stash_quick_payload(text: Option<String>) {
 #[tauri::command]
 fn open_quick(app: tauri::AppHandle, text: Option<String>) {
     stash_quick_payload(text);
-    if let Some(w) = app.get_webview_window("quick") {
-        show_quick(&app, &w);
-        return;
+    let handle = app.clone();
+    if let Err(e) = app.run_on_main_thread(move || {
+        if let Some(w) = handle.get_webview_window("quick") {
+            show_quick(&handle, &w);
+        } else {
+            build_quick(&handle);
+        }
+    }) {
+        eprintln!("呼出快速收词失败: {e}");
     }
-    build_quick(&app);
 }
 
 /// 小窗取走暂存的整句（无则返回 null，小窗回落读剪贴板）
 #[tauri::command]
 fn take_quick_payload() -> Option<String> {
     QUICK_PAYLOAD.lock().ok().and_then(|mut g| g.take())
-}
-
-/// 主窗可见时，小窗的两处「抢戏」都来自它：呼出小窗要激活应用，macOS 激活瞬间
-/// 会切到应用可见窗口所在的 Space——主窗在桌面 Space，别的 App 全屏时用户就被
-/// 拽回桌面；小窗收起后，前台应用只剩主窗可见，系统又把它顶到最前。
-/// 因此呼出期间先把主窗藏起来（仅 macOS，Windows 弹窗不依赖 Space 切换，
-/// 主窗不碍事，维持原行为），收起时再「被动」放回
-static MAIN_HIDDEN_FOR_QUICK: AtomicBool = AtomicBool::new(false);
-
-#[cfg(target_os = "macos")]
-fn stash_main_for_quick(app: &tauri::AppHandle) {
-    if let Some(main) = app.get_webview_window("main") {
-        if main.is_visible().unwrap_or(false) {
-            let _ = main.hide();
-            MAIN_HIDDEN_FOR_QUICK.store(true, Ordering::SeqCst);
-        }
-    }
-}
-
-/// 小窗收起（收词完成 / Esc / 失焦 / 再按热键）后调用：放回为主窗让路时藏掉的主窗
-fn restore_main_after_quick(app: &tauri::AppHandle) {
-    if !MAIN_HIDDEN_FOR_QUICK.swap(false, Ordering::SeqCst) {
-        return;
-    }
-    if let Some(main) = app.get_webview_window("main") {
-        #[cfg(target_os = "macos")]
-        macos_order_front_no_focus(&main);
-        #[cfg(not(target_os = "macos"))]
-        let _ = main.show();
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn macos_order_front_no_focus(w: &tauri::WebviewWindow) {
-    use objc2::rc::Retained;
-    use objc2_app_kit::NSWindow;
-    let Ok(ptr) = w.ns_window() else {
-        return;
-    };
-    unsafe {
-        if let Some(ns) = Retained::retain(ptr as *mut NSWindow) {
-            // 不用 makeKeyAndOrderFront：它会激活应用，收词后把用户拽离当前全屏/前台 App
-            ns.orderFront(None);
-        }
-    }
 }
 
 /// 小窗落在鼠标所在屏居中。NSWindow.center 只认主屏，多屏或全屏 App 在副屏时
@@ -298,50 +266,21 @@ fn center_quick_on_cursor(app: &tauri::AppHandle, w: &tauri::WebviewWindow) {
 }
 
 fn show_quick(app: &tauri::AppHandle, w: &tauri::WebviewWindow) {
-    #[cfg(target_os = "macos")]
-    {
-        // 每次呼出都补设一次，兜住任何把集合行为洗掉的路径
-        macos_join_all_spaces(w);
-        stash_main_for_quick(app);
-    }
     center_quick_on_cursor(app, w);
-    let _ = w.show();
-    let _ = w.set_focus();
+    #[cfg(target_os = "macos")]
+    if let Err(e) = quick_panel::show(w) {
+        eprintln!("显示快速收词面板失败: {e}");
+        return;
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
     let _ = w.emit("quick-show", ());
 }
 
-/// 前端每次收起小窗后调用（对应前端 quickWin.hide() 的所有路径）
-#[tauri::command]
-fn quick_hidden(app: tauri::AppHandle) {
-    restore_main_after_quick(&app);
-}
-
-/// 其他 App 原生全屏时小窗被挡在全屏 Space 外，show + set_focus 也召不到上层。
-/// 给小窗补 CanJoinAllSpaces + FullScreenAuxiliary（Bob/PopClip 类悬浮取词窗的标准做法，
-/// tao 的 set_visible_on_all_workspaces 只设前者，缺 Auxiliary 仍穿不进全屏空间）；
-/// 置于全屏 App 之上靠 always_on_top 的悬浮层级。AppKit 须在主线程调——build_quick
-/// 的调用方（setup、托盘、热键、WKWebView IPC 上的同步命令）都在主线程
-#[cfg(target_os = "macos")]
-fn macos_join_all_spaces(w: &tauri::WebviewWindow) {
-    use objc2::rc::Retained;
-    use objc2_app_kit::{NSWindow, NSWindowCollectionBehavior};
-    let Ok(ptr) = w.ns_window() else {
-        return;
-    };
-    unsafe {
-        if let Some(ns) = Retained::retain(ptr as *mut NSWindow) {
-            let mut behavior = ns.collectionBehavior();
-            behavior |= NSWindowCollectionBehavior::CanJoinAllSpaces
-                | NSWindowCollectionBehavior::FullScreenAuxiliary;
-            ns.setCollectionBehavior(behavior);
-        }
-    }
-}
-
 fn build_quick(app: &tauri::AppHandle) {
-    // 小窗创建即显示，主窗要在 build 前就藏好，别让激活瞬间切走 Space
-    #[cfg(target_os = "macos")]
-    stash_main_for_quick(app);
     let builder = tauri::WebviewWindowBuilder::new(
         app,
         "quick",
@@ -358,13 +297,14 @@ fn build_quick(app: &tauri::AppHandle) {
     // 透明窗体：Windows 直支；macOS 需 macos-private-api 特性（Cargo.toml 已开 +
     // tauri.conf.json macOSPrivateApi），小窗圆角卡片才不会露白底
     let builder = builder.transparent(true);
-    let _ = builder.build().map(|w| {
-        // 建好即设集合行为，首次呼出就发生在别的 App 全屏时也能盖上去
-        #[cfg(target_os = "macos")]
-        macos_join_all_spaces(&w);
-        let _ = w.set_focus();
-        // webview 还没加载完，不 emit quick-show；QuickCapture 挂载时会自取剪贴板
-    });
+    // macOS 先配置成非激活面板再显示，避免首次创建时普通窗口抢走全屏 Space。
+    // Windows 保留创建即显示，避免 WebView2 透明窗口忽略 visible:false 的问题。
+    #[cfg(target_os = "macos")]
+    let builder = builder.visible(false).focused(false);
+    match builder.build() {
+        Ok(w) => show_quick(app, &w),
+        Err(e) => eprintln!("创建快速收词窗口失败: {e}"),
+    }
 }
 
 /// 划词直加热键：让主窗口前端执行「读选中 → 直接入书 → 系统通知」
@@ -596,6 +536,11 @@ fn read_backup_file(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| e.to_string())
 }
 
+pub(crate) fn window_state_plugin() -> tauri_plugin_window_state::Builder {
+    // 临时面板每次跟随鼠标定位；状态恢复的 show/set_focus 会在 NSPanel 配置前激活应用。
+    tauri_plugin_window_state::Builder::default().with_denylist(&["quick"])
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -610,7 +555,7 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(window_state_plugin().build())
         .plugin(
             tauri_plugin_sql::Builder::default()
                 .add_migrations("sqlite:immerso.db", migrations())
@@ -621,7 +566,6 @@ pub fn run() {
             capture_selected,
             open_quick,
             take_quick_payload,
-            quick_hidden,
             gist_http,
             write_backup_file,
             read_backup_file
@@ -641,6 +585,8 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            app.handle().plugin(tauri_nspanel::init())?;
 
             // 系统托盘：驻留后台的常驻入口
             let show_item = MenuItem::with_id(app, "tray-show", "显示浸词", true, None::<&str>)?;

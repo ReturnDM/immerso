@@ -15,10 +15,9 @@ import { speak } from "./lib/fsrs";
 
 const quickWin = getCurrentWebviewWindow();
 
-/** 收起小窗并通知后端：把呼出期间为主窗让路藏掉的主窗「被动」放回去（不抢焦点） */
+/** 收起小窗，焦点交还原窗口；无需改变主窗的显隐状态。 */
 const hideQuick = () => {
   void quickWin.hide();
-  void invoke("quick_hidden").catch(() => {});
 };
 
 export default function QuickCapture() {
