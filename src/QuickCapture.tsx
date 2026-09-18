@@ -15,6 +15,12 @@ import { speak } from "./lib/fsrs";
 
 const quickWin = getCurrentWebviewWindow();
 
+/** 收起小窗并通知后端：把呼出期间为主窗让路藏掉的主窗「被动」放回去（不抢焦点） */
+const hideQuick = () => {
+  void quickWin.hide();
+  void invoke("quick_hidden").catch(() => {});
+};
+
 export default function QuickCapture() {
   const [word, setWord] = useState("");
   const [context, setContext] = useState("");
@@ -90,9 +96,12 @@ export default function QuickCapture() {
       return;
     }
     const t = setTimeout(() => {
-      void resolveWord(w).then((next) => {
-        if (id === resolveRequest.current) setResolved(next);
-      });
+      // 查库失败不落下未处理 rejection，收词时 add() 会现算兜底
+      void resolveWord(w)
+        .then((next) => {
+          if (id === resolveRequest.current) setResolved(next);
+        })
+        .catch(() => {});
     }, 160);
     return () => clearTimeout(t);
   }, [word]);
@@ -103,7 +112,7 @@ export default function QuickCapture() {
     const unShow = quickWin.listen("quick-show", () => void prepare());
     const unFocus = quickWin.onFocusChanged(({ payload: focused }) => {
       if (focused) void prepare();
-      else void quickWin.hide();
+      else hideQuick();
     });
     return () => {
       void unShow.then((f) => f());
@@ -113,11 +122,15 @@ export default function QuickCapture() {
   }, []);
 
   const add = async () => {
-    const r = resolved;
-    // 即使未来有新的异步入口，也绝不按与输入框不一致的解析结果入库。
-    if (!r?.word || r.word !== cleanWord(word) || busy) return;
+    if (busy) return;
+    // 以输入框实时值为准：IME 提交回车、打完字立刻回车时，防抖解析态（resolved）
+    // 可能还没跟上，只认它就会静默不收——此处现算，绝不按与输入框不一致的结果入库
+    const cur = inputRef.current?.value ?? word;
+    const cleaned = cleanWord(cur);
+    if (!cleaned) return;
     setBusy(true);
     try {
+      const r = resolved?.word === cleaned ? resolved : await resolveWord(cur);
       if (r.inDecks.includes(deck)) {
         setStatus({ ok: false, text: `已在「${deck}」` });
         return;
@@ -130,7 +143,7 @@ export default function QuickCapture() {
       void setSetting("quick_deck", deck);
       const via = r.viaLemma ? `（${r.viaLemma} → ${r.cardWord}）` : "";
       setStatus({ ok: true, text: `✓ ${r.cardWord}${via} 已收进「${deck}」` });
-      setTimeout(() => void quickWin.hide(), 900);
+      setTimeout(hideQuick, 900);
     } catch (e) {
       setStatus({ ok: false, text: String(e) });
     } finally {
@@ -159,7 +172,7 @@ export default function QuickCapture() {
         onChange={(e) => setWord(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter") void add();
-          else if (e.key === "Escape") void quickWin.hide();
+          else if (e.key === "Escape") hideQuick();
         }}
         placeholder="输入或粘贴单词…"
         spellCheck={false}
@@ -170,7 +183,7 @@ export default function QuickCapture() {
         onChange={(e) => setContext(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter") void add();
-          else if (e.key === "Escape") void quickWin.hide();
+          else if (e.key === "Escape") hideQuick();
         }}
         placeholder="原句（可选，随词一起收）"
         spellCheck={false}
@@ -202,6 +215,8 @@ export default function QuickCapture() {
         {decks.map((d) => (
           <button
             key={d}
+            // 点击只改选中态，不把焦点从输入框抢走——焦点落在按钮上时 Enter 会变成「再点一次按钮」而不是收词
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => setDeck(d)}
             className={`rounded-full px-3 py-1 text-xs transition-colors ${
               deck === d
