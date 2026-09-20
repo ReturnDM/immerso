@@ -2187,7 +2187,7 @@ dependencies = [
 
 [[package]]
 name = "immerso"
-version = "1.4.2"
+version = "1.5.0"
 dependencies = [
  "core-foundation 0.10.1",
  "enigo",
