@@ -290,7 +290,22 @@ export default function Review({ onExit }: { onExit: () => void }) {
       try {
         await applyReview(item, g, sched, Date.now() - shownAt.current);
       } catch (e) {
-        setBug(String(e));
+        const msg = String(e);
+        if (msg.includes("STALE_CARD")) {
+          // [B-02] 该卡刚在另一个窗口被复习过（CAS 检测到快照过期）：
+          // 不重复评分，友好提示并跳过
+          setBug("这张卡刚在其他窗口复习过，已为你跳过");
+          setDoneIds((s) => new Set(s).add(item.id));
+          gradingItem.current = null;
+          setGrading(false);
+          if (idx + 1 >= queue!.length) setQueue([]);
+          else {
+            setIdx(idx + 1);
+            resetPrompt();
+          }
+          return;
+        }
+        setBug(msg);
         gradingItem.current = null;
         setGrading(false);
         return;

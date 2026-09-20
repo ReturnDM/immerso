@@ -23,6 +23,7 @@ dist-ssr
 *.sln
 *.sw?
 .cache/
+coverage/
 *.db
 release_body.md
 src-tauri/resources/

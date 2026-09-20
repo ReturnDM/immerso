@@ -9,9 +9,12 @@ use tauri_plugin_sql::{Migration, MigrationKind};
 mod quick_panel;
 
 const CORE_SCHEMA: &str = r#"
+-- 全库时间统一 UTC，格式 YYYY-MM-DD HH:MM:SS（与前端 fmtDbTime() 读取格式一致）。
+-- 历史版本 DEFAULT (datetime('now','localtime')) 存在时区歧义（B-03 附带修正），
+-- 仅影响新装用户建表；存量库由前端显式传值兜底，无需重建。
 CREATE TABLE IF NOT EXISTS cards (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  word TEXT NOT NULL UNIQUE,
+  word TEXT NOT NULL COLLATE NOCASE UNIQUE,
   source_id INTEGER REFERENCES sources(id),
   stability REAL NOT NULL DEFAULT 0,
   difficulty REAL NOT NULL DEFAULT 0,
@@ -22,7 +25,7 @@ CREATE TABLE IF NOT EXISTS cards (
   reps INTEGER NOT NULL DEFAULT 0,
   lapses INTEGER NOT NULL DEFAULT 0,
   suspended INTEGER NOT NULL DEFAULT 0,
-  added_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+  added_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_cards_due ON cards(due);
 CREATE INDEX IF NOT EXISTS idx_cards_state ON cards(state);
@@ -30,7 +33,7 @@ CREATE INDEX IF NOT EXISTS idx_cards_state ON cards(state);
 CREATE TABLE IF NOT EXISTS reviews (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   card_id INTEGER NOT NULL REFERENCES cards(id),
-  reviewed_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+  reviewed_at TEXT NOT NULL DEFAULT (datetime('now')),
   rating INTEGER NOT NULL,
   state INTEGER,
   stability REAL,
@@ -46,7 +49,7 @@ CREATE TABLE IF NOT EXISTS sources (
   kind TEXT NOT NULL DEFAULT 'manual',
   context TEXT,
   ref TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -133,6 +136,48 @@ CREATE TABLE deck_words_ci (
 INSERT OR IGNORE INTO deck_words_ci (word, deck) SELECT word, deck FROM deck_words;
 DROP TABLE deck_words;
 ALTER TABLE deck_words_ci RENAME TO deck_words;
+"#,
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 8,
+            description: "cards_word_case_insensitive_unique",
+            // cards.word 原为大小写敏感的 UNIQUE：'Apple'/'apple' 能同时入书（B-05），
+            // 与全库 COLLATE NOCASE 查询语义不一致。重建为 word COLLATE NOCASE UNIQUE；
+            // 存量大小写重复行借 INSERT OR IGNORE（ORDER BY id 保留先插的那条）收敛。
+            //
+            // 迁移执行方式（与 v7 同模式已验证）：sqlx Migrator 对 sqlite 每个迁移在
+            // 单个事务里执行全部语句（插件构造 SqlxMigration 时 no_transaction=false），
+            // SQLite 的 DDL（CREATE/DROP/ALTER）支持事务内执行；v7 已用同样的
+            // CREATE+INSERT+DROP+RENAME 组合跑通。
+            //
+            // 外键风险：reviews.card_id REFERENCES cards(id)。本应用连接从未开启
+            // PRAGMA foreign_keys（插件 path_mapper 连接串不带该参数），DROP TABLE 不受
+            // 外键约束阻碍；若未来某处开启 foreign_keys，此迁移需要在关闭外键状态下执行。
+            sql: r#"
+CREATE TABLE cards_new (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  word TEXT NOT NULL COLLATE NOCASE UNIQUE,
+  source_id INTEGER REFERENCES sources(id),
+  stability REAL NOT NULL DEFAULT 0,
+  difficulty REAL NOT NULL DEFAULT 0,
+  due TEXT,
+  last_review TEXT,
+  state INTEGER NOT NULL DEFAULT 0,
+  step INTEGER NOT NULL DEFAULT 0,
+  reps INTEGER NOT NULL DEFAULT 0,
+  lapses INTEGER NOT NULL DEFAULT 0,
+  suspended INTEGER NOT NULL DEFAULT 0,
+  added_at TEXT NOT NULL DEFAULT (datetime('now')),
+  deck TEXT NOT NULL DEFAULT '生词本'
+);
+INSERT OR IGNORE INTO cards_new (id, word, source_id, stability, difficulty, due, last_review, state, step, reps, lapses, suspended, added_at, deck)
+  SELECT id, word, source_id, stability, difficulty, due, last_review, state, step, reps, lapses, suspended, added_at, deck
+  FROM cards ORDER BY id;
+DROP TABLE cards;
+ALTER TABLE cards_new RENAME TO cards;
+CREATE INDEX IF NOT EXISTS idx_cards_due ON cards(due);
+CREATE INDEX IF NOT EXISTS idx_cards_state ON cards(state);
 "#,
             kind: MigrationKind::Up,
         },
@@ -414,6 +459,21 @@ async fn capture_selected(app: tauri::AppHandle) -> Result<String, String> {
         use enigo::{Direction, Enigo, Key, Keyboard, Settings};
         use tauri_plugin_clipboard_manager::ClipboardExt;
 
+        // RAII：修饰键按下后立即构造，保证后续任何错误路径（Click 失败、等待超时、
+        // 读剪贴板失败 → 提前 return）都会在 Drop 中执行 Release，
+        // 杜绝 Ctrl/⌘ 卡死的全局键盘锁死（B-03）。Release 失败只记日志，不 panic
+        struct ModifierGuard<'a> {
+            enigo: &'a mut Enigo,
+            key: Key,
+        }
+        impl Drop for ModifierGuard<'_> {
+            fn drop(&mut self) {
+                if let Err(e) = self.enigo.key(self.key, Direction::Release) {
+                    eprintln!("修饰键释放失败: {e}");
+                }
+            }
+        }
+
         // macOS/Windows 都能查剪贴板序号；其余平台退回内容比对
         #[cfg(any(target_os = "macos", target_os = "windows"))]
         let seq_supported = true;
@@ -431,8 +491,15 @@ async fn capture_selected(app: tauri::AppHandle) -> Result<String, String> {
         #[cfg(not(target_os = "macos"))]
         let (modifier, copy) = (Key::Control, Key::Unicode('c'));
         enigo.key(modifier, Direction::Press).map_err(|e| e.to_string())?;
-        enigo.key(copy, Direction::Click).map_err(|e| e.to_string())?;
-        enigo.key(modifier, Direction::Release).map_err(|e| e.to_string())?;
+        let guard = ModifierGuard {
+            enigo: &mut enigo,
+            key: modifier,
+        };
+        // 后续按键操作一律经 guard 的 enigo 引用，确保 guard 持有该可变借用直到函数结束
+        guard
+            .enigo
+            .key(copy, Direction::Click)
+            .map_err(|e| e.to_string())?;
 
         // 等目标应用把选区写进剪贴板。固定睡 180ms 的老做法在应用响应慢或
         // 忽略 ⌘C 时会把旧剪贴板误当选区；没等到新内容就明确报错，宁可不收也不错收
@@ -523,17 +590,211 @@ async fn gist_http(
     Ok((status, text))
 }
 
-/// 导出备份到用户在保存对话框选定的路径。放 Rust 侧直写文件，
-/// 省得为「任意导出路径」给前端 fs 权限开全盘写
-#[tauri::command]
-fn write_backup_file(path: String, content: String) -> Result<(), String> {
-    std::fs::write(&path, content).map_err(|e| e.to_string())
+/// 内置词典是否需要从资源目录重新释放到数据目录：
+/// 大小不同 → 需要；大小相同但前 4096 字节不同（同体积重打包的新版）→ 也需要。
+/// target 不存在时视为需要释放（metadata 取 0 vs res 的 len 必然不同）。
+fn dict_needs_copy(res: &std::path::Path, target: &std::path::Path) -> bool {
+    use std::io::Read;
+    let sz_res = std::fs::metadata(res).map(|m| m.len()).unwrap_or(0);
+    let sz_tgt = std::fs::metadata(target).map(|m| m.len()).unwrap_or(0);
+    if sz_res != sz_tgt {
+        return true;
+    }
+    // 大小一致时对比文件头；任一读取失败视为需要重新释放（保守）
+    let mut head_res = [0u8; 4096];
+    let mut head_tgt = [0u8; 4096];
+    let n_res = std::fs::File::open(res)
+        .and_then(|mut f| f.read(&mut head_res))
+        .unwrap_or(0);
+    let n_tgt = std::fs::File::open(target)
+        .and_then(|mut f| f.read(&mut head_tgt))
+        .unwrap_or(0);
+    n_res != n_tgt || head_res != head_tgt
 }
 
-/// 读取用户在打开对话框选定的备份文件
+/// 今天的 YYYYMMDD 串（导出备份的默认文件名用）。
+/// 不引 chrono 依赖，用 Hinnant 的 civil_from_days 算法从 unix 秒换算，
+/// 取 UTC 日近似即可（仅作默认文件名，时区差一天不影响功能）
+fn today_yyyymmdd() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let z = secs / 86400 + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    format!("{y:04}{m:02}{d:02}")
+}
+
+/// 导出备份。Rust 侧弹保存对话框并直写文件，不信任前端传的任何路径
+/// （旧实现收前端 path 直接 std::fs::write，被注入即可覆盖任意文件，绕过 fs 权限收窄）。
+///
+/// 契约（前端据此适配，见 docs/fix-rust.md）：
+/// - Ok("cancelled")：用户在保存对话框点了取消
+/// - Ok("ok:<path>")：写入成功，path 为最终落盘路径（扩展名非 .json 已自动补全）
+/// - Err(msg)：写入失败
 #[tauri::command]
-fn read_backup_file(path: String) -> Result<String, String> {
-    std::fs::read_to_string(&path).map_err(|e| e.to_string())
+async fn write_backup_file(app: tauri::AppHandle, content: String) -> Result<String, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let default_name = format!("immerso-backup-{}.json", today_yyyymmdd());
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title("导出备份")
+            .set_file_name(default_name)
+            .add_filter("JSON 备份", &["json"])
+            .blocking_save_file()
+            .and_then(|f| f.into_path().ok())
+    })
+    .await
+    .map_err(|e| format!("弹出保存对话框失败: {e}"))?;
+    let Some(path) = picked else {
+        return Ok("cancelled".to_string()); // 用户取消
+    };
+    // 用户在对话框里敲的文件名可能没扩展名，补 .json，保证前端按扩展名识别
+    let path = if path
+        .extension()
+        .map(|e| e.eq_ignore_ascii_case("json"))
+        .unwrap_or(false)
+    {
+        path
+    } else {
+        path.with_extension("json")
+    };
+    std::fs::write(&path, &content).map_err(|e| format!("写入备份失败: {e}"))?;
+    Ok(format!("ok:{}", path.display()))
+}
+
+/// 读取备份。Rust 侧弹打开对话框再读文件，不信任前端传的任何路径
+/// （旧实现收前端 path 直接 std::fs::read_to_string，被注入即可读走任意文件）。
+///
+/// 契约（前端据此适配）：
+/// - Ok("cancelled")：用户在打开对话框点了取消
+/// - Ok(内容)：读取成功，返回备份文件全文
+/// - Err(msg)：读取失败 / 文件超过 20MB 限制
+#[tauri::command]
+async fn read_backup_file(app: tauri::AppHandle) -> Result<String, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title("导入备份")
+            .add_filter("JSON 备份", &["json"])
+            .blocking_pick_file()
+            .and_then(|f| f.into_path().ok())
+    })
+    .await
+    .map_err(|e| format!("弹出打开对话框失败: {e}"))?;
+    let Some(path) = picked else {
+        return Ok("cancelled".to_string()); // 用户取消
+    };
+    // 防大文件把进程读爆：> 20MB 直接拒
+    let len = std::fs::metadata(&path)
+        .map_err(|e| format!("读取文件信息失败: {e}"))?
+        .len();
+    if len > 20 * 1024 * 1024 {
+        return Err(format!("备份文件超过 20MB 限制（{} 字节）", len));
+    }
+    std::fs::read_to_string(&path).map_err(|e| format!("读取备份失败: {e}"))
+}
+
+/// 事务批量执行：一次调用把多条写语句放进同一 SQLite 事务，全部成功才提交，
+/// 任一条失败整体回滚。供前端「导入备份 / 批量写入」等需要原子性的场景使用。
+///
+/// 为什么不走 tauri-plugin-sql 的 execute？插件内部池不对外公开，无法在其上开事务；
+/// 这里自建一条独立连接（单连接池，max_connections=1）直连同一个库文件
+/// （app_config_dir/immerso.db，与插件 path_mapper 指向一致）。
+///
+/// 并发写锁说明：SQLite 默认 journal 模式，本命令与插件连接并存写同一库时可能互相
+/// 撞锁，连接串已设 busy_timeout(5s)，撞锁会等待对方释放；若 5s 内拿不到锁返回错误。
+/// 前端应避免与插件写命令并发调用本命令（如导入前不并发执行其他写操作）。
+///
+/// 参数：db 固定接受 "sqlite:immerso.db"（与插件连接串一致，其余一律拒绝）；
+/// ops 为 [(sql, params)] 列表，params 中的 null → NULL、string → TEXT、
+/// number → REAL、其余（bool/数组/对象）→ 按 serde_json 值直接绑定（同插件
+/// wrapper.rs 的绑定语义，json 对象会被存成 JSON 文本）。
+///
+/// 返回：Vec<(rows_affected, last_insert_rowid)>，与 ops 一一对应；
+/// 失败返回 Err(描述)，事务已回滚。
+#[tauri::command]
+async fn execute_tx(
+    app: tauri::AppHandle,
+    db: String,
+    ops: Vec<(String, Vec<serde_json::Value>)>,
+) -> Result<Vec<(u64, i64)>, String> {
+    use sqlx::Executor;
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+
+    // 与插件同样的连接串才放行，防止路径注入/指向任意库文件
+    if db != "sqlite:immerso.db" {
+        return Err(format!("不支持的数据库连接串: {db}（仅接受 sqlite:immerso.db）"));
+    }
+    let dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| format!("获取应用配置目录失败: {e}"))?;
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        return Err(format!("创建应用配置目录失败: {e}"));
+    }
+    let db_path = dir.join("immerso.db");
+    let options = SqliteConnectOptions::new()
+        .filename(db_path)
+        .create_if_missing(false)
+        .busy_timeout(std::time::Duration::from_secs(5));
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(options)
+        .await
+        .map_err(|e| format!("打开数据库失败: {e}"))?;
+    let mut conn = pool
+        .acquire()
+        .await
+        .map_err(|e| format!("获取数据库连接失败: {e}"))?;
+
+    // BEGIN IMMEDIATE：立即拿写锁，避免两个写事务升级锁时的死锁。
+    // 显式用 Executor::execute（executor 为 self），避免 Execute::execute 的
+    // 生命周期泛型在 tauri command 宏下触发 HRTB 检查失败
+    (&mut *conn)
+        .execute(sqlx::raw_sql("BEGIN IMMEDIATE"))
+        .await
+        .map_err(|e| format!("开启事务失败: {e}"))?;
+
+    let mut results = Vec::with_capacity(ops.len());
+    for (sql, params) in &ops {
+        let mut query = sqlx::query(sql);
+        for value in params {
+            if value.is_null() {
+                query = query.bind(None::<serde_json::Value>);
+            } else if value.is_string() {
+                query = query.bind(value.as_str().unwrap().to_owned());
+            } else if let Some(number) = value.as_number() {
+                query = query.bind(number.as_f64().unwrap_or_default());
+            } else {
+                query = query.bind(value.clone());
+            }
+        }
+        match (&mut *conn).execute(query).await {
+            Ok(res) => results.push((res.rows_affected(), res.last_insert_rowid())),
+            Err(e) => {
+                // 任意一条失败：整个事务回滚后再报错
+                let _ = (&mut *conn).execute(sqlx::raw_sql("ROLLBACK")).await;
+                return Err(format!("事务执行失败，已回滚: {e}"));
+            }
+        }
+    }
+
+    (&mut *conn)
+        .execute(sqlx::raw_sql("COMMIT"))
+        .await
+        .map_err(|e| format!("提交事务失败: {e}"))?;
+    Ok(results)
 }
 
 pub(crate) fn window_state_plugin() -> tauri_plugin_window_state::Builder {
@@ -568,7 +829,8 @@ pub fn run() {
             take_quick_payload,
             gist_http,
             write_backup_file,
-            read_backup_file
+            read_backup_file,
+            execute_tx
         ])
         // 关闭主窗 = 缩到托盘后台（热键照常可用）；退出走托盘菜单或 Cmd+Q。
         // 隐藏不走关闭流程，窗口位置/大小在这里显式落盘
@@ -615,7 +877,9 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
-            // 内置词典释放：安装包带 resources/dict.db 时拷到数据目录（大小不同视为新版覆盖）。
+            // 内置词典释放：安装包带 resources/dict.db 时拷到数据目录。
+            // 判新旧不只看文件大小——大小相同但内容不同的新版（同体积重打包）也须覆盖，
+            // 所以「大小不同 OR 前 4096 字节不同」都视为需要重新释放。
             // 不让插件直读资源绝对路径——sqlx 对 Windows 绝对路径连接串解析不可靠。
             let res = app
                 .path()
@@ -624,8 +888,7 @@ pub fn run() {
                 if res.exists() {
                     let target = app.path().app_config_dir().map(|p| p.join("dict.db"));
                     if let Ok(target) = target {
-                        let stale = std::fs::metadata(&target).map(|m| m.len()).unwrap_or(0)
-                            != std::fs::metadata(&res).map(|m| m.len()).unwrap_or(1);
+                        let stale = dict_needs_copy(&res, &target);
                         if stale {
                             // macOS/全新机器：数据目录首启时还不存在，先建目录再释放
                             if let Some(parent) = target.parent() {

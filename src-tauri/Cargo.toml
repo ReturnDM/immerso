@@ -35,6 +35,9 @@ tauri-plugin-global-shortcut = "2"
 tauri-plugin-clipboard-manager = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# execute_tx 自建 SQLite 连接做原生事务（tauri-plugin-sql 的池未公开，无法复用）；
+# 版本与 lock 中 tauri-plugin-sql 引入的 sqlx 0.8 一致，features 对齐插件的 sqlite + runtime-tokio
+sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio"] }
 reqwest = "0.12"
 enigo = "0.6.1"
 tauri-plugin-notification = "2.4.0"

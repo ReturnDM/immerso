@@ -58,10 +58,19 @@ export async function neathSync(): Promise<{ added: number; existing: number }> 
         "INSERT INTO sources (kind, context, ref) VALUES ('neath', ?, ?)",
         [it.sentence, `匿词·词书 ${it.notebook_id}`],
       );
-      await db.execute("INSERT INTO cards (word, source_id) VALUES (?, ?)", [
-        it.word,
-        src.lastInsertId,
-      ]);
+      // 上面 NOCASE 查重通过后、此行执行前，并发收词/另一轮同步可能已插入同词——
+      // 裸 INSERT 会撞 cards.word 的唯一约束抛 SQLITE_CONSTRAINT，整次匿词同步中途崩掉。
+      // 用 ON CONFLICT DO NOTHING 幂等兜底：若受影响行数为 0，说明词已被并发插入，
+      // 刚建的 sources 记录成了无人引用的孤儿，一并清掉后按已有词计数。
+      const r = await db.execute(
+        "INSERT INTO cards (word, source_id) VALUES (?, ?) ON CONFLICT(word) DO NOTHING",
+        [it.word, src.lastInsertId],
+      );
+      if ((r.rowsAffected ?? 0) === 0) {
+        await db.execute("DELETE FROM sources WHERE id = ?", [src.lastInsertId]);
+        existing++;
+        continue;
+      }
       await db.execute("INSERT OR IGNORE INTO deck_words (word, deck) VALUES (?, ?)", [
         it.word,
         "生词本",

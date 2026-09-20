@@ -1,9 +1,46 @@
 import Database from "@tauri-apps/plugin-sql";
+import { invoke } from "@tauri-apps/api/core";
 import { emitTo } from "@tauri-apps/api/event";
 import type { Card, Grade, RecordLogItem } from "ts-fsrs";
 import { toCard } from "./fsrs";
 import { editDistance } from "./spell";
 import { DEFAULT_MODES, parseModes, serializeModes, type ExMode } from "./exercises";
+
+/**
+ * 统一时间戳：UTC 无毫秒，YYYY-MM-DD HH:MM:SS，与 SQLite datetime('now')（UTC）同格式，
+ * 可安全字典序比较；跨设备、跨格式混用不再出错（[B-01]）。
+ * 注意 JS 的 new Date("YYYY-MM-DD HH:MM:SS") 会按本地时区解析，往返会丢时区，
+ * 需要精确回读的地方（如 applyReview 的 CAS）应保留原始字符串而非经 Date 往返。
+ */
+export function fmtDbTime(d: Date = new Date()): string {
+  return d.toISOString().slice(0, 19).replace("T", " ");
+}
+
+// ---------- 事务与并发 ----------
+
+/** 进程内评分串行锁：同一窗口内评分严格排队（跨窗口靠 CAS + 事务兜底，见 applyReview） */
+let reviewQueue: Promise<unknown> = Promise.resolve();
+
+/**
+ * 在一个 SQLite 事务内顺序执行多条写语句：任一失败整体回滚。
+ * 依赖 Rust 侧 execute_tx 命令（契约：ops 顺序执行，BEGIN IMMEDIATE → 全部成功 COMMIT，
+ * 任一失败 ROLLBACK 并返回错误；返回每条的 [rowsAffected, lastInsertId]）。
+ * 空列表直接返回，不发 IPC。
+ */
+export async function withTx(
+  ops: { sql: string; params?: unknown[] }[],
+): Promise<{ rowsAffected: number; lastInsertId: number | null }[]> {
+  if (ops.length === 0) return [];
+  const res = await invoke<[number, number][]>("execute_tx", {
+    db: "sqlite:immerso.db",
+    // Rust 端契约是 Vec<(String, Vec<Value>)>，IPC 上每项必须是 [sql, params] 数组
+    ops: ops.map((o) => [o.sql, o.params ?? []]),
+  });
+  return res.map(([rowsAffected, lastInsertId]) => ({
+    rowsAffected,
+    lastInsertId: lastInsertId === 0 ? null : lastInsertId,
+  }));
+}
 
 export const DEFAULT_DAILY_NEW = 10;
 export const DEFAULT_DECK = "生词本";
@@ -56,6 +93,17 @@ export interface QueueItem {
   /** 间隔式练习的断点：带着它插回队列，轮到时从 seq[pos] 续练 */
   resume?: { seq: ExMode[]; pos: number; errors: number };
 }
+
+/**
+ * 本窗口最近一次"看到/写入"的卡片状态快照（applyReview CAS 冲突检测用，[B-02]）。
+ * 键为 card id：getQueue 加载时登记；applyReview 成功写入后更新为新值。
+ * 由于 JS 的 new Date("YYYY-MM-DD HH:MM:SS") 按本地时区解析（丢时区），快照必须
+ * 存原始 DB 字符串而非经 Date 往返的值。
+ */
+const cardSnapshots = new Map<
+  number,
+  { due: string | null; last_review: string | null; reps: number; state: number }
+>();
 
 // ---------- 设置 ----------
 
@@ -130,6 +178,11 @@ function deckClause(deck: string): { sql: string; params: string[] } {
 const normWord = (s: string) => s.trim().toLowerCase();
 const HAS_CJK = /[\u3400-\u9fff]/;
 
+/** LIKE 通配符转义：把 % _ \ 转义为 \% \_ \\，配合 SQL 中的 ESCAPE '\' 使用（[B-07]） */
+function escapeLike(s: string): string {
+  return s.replace(/[\\%_]/g, (m) => "\\" + m);
+}
+
 /**
  * 查词：英文按前缀联想（精确置顶 + 常用度排序），中文对释义列做子串匹配，
  * 两路都按常用度（词频 → 牛津/柯林斯 → 词长）排序；前缀候选太少时补「包含」匹配兜底。
@@ -147,11 +200,11 @@ export async function lookup(q: string): Promise<DictEntry[]> {
   if (HAS_CJK.test(norm)) {
     const rows = await db.select<DictEntry[]>(
       `SELECT ${cols} FROM dict
-       WHERE translation LIKE '%' || ? || '%'
+       WHERE translation LIKE '%' || ? || '%' ESCAPE '\'
        ORDER BY CASE WHEN instr(translation, ?) BETWEEN 1 AND 30 THEN 0 ELSE 1 END,
                 ${freqOrd}, instr(translation, ?), LENGTH(word), word
        LIMIT 30`,
-      [q.trim(), q.trim(), q.trim()],
+      [escapeLike(q.trim()), q.trim(), q.trim()],
     );
     for (const r of rows) r.hit = "zh";
     return rows;
@@ -159,11 +212,11 @@ export async function lookup(q: string): Promise<DictEntry[]> {
 
   const rows = await db.select<DictEntry[]>(
     `SELECT ${cols} FROM dict
-     WHERE word LIKE ? ${norm.length === 1 ? "AND frq > 0" : ""}
+     WHERE word LIKE ? ESCAPE '\' ${norm.length === 1 ? "AND frq > 0" : ""}
      ORDER BY CASE WHEN word = ? COLLATE NOCASE THEN 0 ELSE 1 END,
               ${freqOrd}, LENGTH(word), word
      LIMIT 30`,
-    [q + "%", q],
+    [escapeLike(q) + "%", q],
   );
   for (const r of rows) r.hit = normWord(r.word) === norm ? "exact" : "prefix";
   // 兜底「包含」匹配限常用词：LIKE '%q%' 走不了索引，全表扫描仅在候选少时触发
@@ -171,11 +224,11 @@ export async function lookup(q: string): Promise<DictEntry[]> {
     const seen = new Set(rows.map((r) => normWord(r.word)));
     const extra = await db.select<DictEntry[]>(
       `SELECT ${cols} FROM dict
-       WHERE word LIKE '%' || ? || '%' AND word NOT LIKE ?
+       WHERE word LIKE '%' || ? || '%' ESCAPE '\' AND word NOT LIKE ? ESCAPE '\'
          AND (frq > 0 OR oxford > 0 OR collins > 0)
        ORDER BY ${freqOrd}, LENGTH(word), word
        LIMIT 12`,
-      [q, q + "%"],
+      [escapeLike(q), escapeLike(q) + "%"],
     );
     for (const r of extra) {
       if (seen.has(normWord(r.word))) continue;
@@ -277,10 +330,20 @@ export async function addCard(
     );
     sourceId = src.lastInsertId ?? null;
   }
-  await db.execute(
+  const ins = await db.execute(
     "INSERT INTO cards (word, source_id, deck) VALUES (?, ?, ?) ON CONFLICT(word) DO NOTHING",
     [word, sourceId, deck],
   );
+  if ((ins.rowsAffected ?? 0) === 0) {
+    // 并发窗口刚插入同词（查重与插入之间竞态）→ 视为已存在：不抛错，仍补上词书标签
+    const r = await db.execute(
+      "INSERT OR IGNORE INTO deck_words (word, deck) VALUES (?, ?)",
+      [word, deck],
+    );
+    const tagged = (r.rowsAffected ?? 0) > 0;
+    if (tagged) libraryChanged();
+    return tagged ? "added" : "exists";
+  }
   await db.execute(
     "INSERT OR IGNORE INTO deck_words (word, deck) VALUES (?, ?)",
     [word, deck],
@@ -304,17 +367,18 @@ async function count(db: Database, sql: string, params: unknown[] = []): Promise
 
 async function newQuotaLeft(db: Database, deck: string): Promise<number> {
   // 今天首次被复习的卡 = 今天新引入。不能数 reps（同一天复习第二次 reps 就变 2），
-  // 用 reviews 里"没有早于今天的记录、且有今天的记录"判定；reviewed_at 是 SQLite
-  // localtime 格式，阈值也用 SQLite 本地当日零点，避免跨格式字典序比较
+  // 用 reviews 里"没有早于今天的记录、且有今天的记录"判定；reviewed_at 是 UTC
+  // YYYY-MM-DD HH:MM:SS 格式（fmtDbTime），阈值也用 SQLite UTC 当日零点
+  // （datetime('now','start of day')），同格式字典序比较才正确（[B-01]）
   const { sql: dc, params: dp } = deckClause(deck);
   const introduced = await count(
     db,
     `SELECT COUNT(*) n FROM cards c
      WHERE c.suspended = 0${dc}
        AND EXISTS (SELECT 1 FROM reviews r WHERE r.card_id = c.id
-                   AND r.reviewed_at >= datetime('now', 'localtime', 'start of day'))
+                   AND r.reviewed_at >= datetime('now', 'start of day'))
        AND NOT EXISTS (SELECT 1 FROM reviews r WHERE r.card_id = c.id
-                       AND r.reviewed_at < datetime('now', 'localtime', 'start of day'))`,
+                       AND r.reviewed_at < datetime('now', 'start of day'))`,
     dp,
   );
   return Math.max(0, (await getDailyNew()) - introduced);
@@ -322,7 +386,7 @@ async function newQuotaLeft(db: Database, deck: string): Promise<number> {
 
 export async function getTodayStats(deck: string): Promise<TodayStats> {
   const db = await getApp();
-  const now = new Date().toISOString();
+  const now = fmtDbTime();
   const { sql: dc, params: dp } = deckClause(deck);
   const reviewCount = await count(
     db,
@@ -337,11 +401,11 @@ export async function getTodayStats(deck: string): Promise<TodayStats> {
   const newCount = Math.min(await newQuotaLeft(db, deck), availableNew);
   const doneToday = await count(
     db,
-    // reviewed_at 是 SQLite datetime('now','localtime') 格式，阈值同格式才能正确比较
-    // （JS 的 UTC ISO 与它做字典序比较只在东八区碰巧正确）
+    // reviewed_at 是 fmtDbTime 写入的 UTC YYYY-MM-DD HH:MM:SS（B-01），阈值用 SQLite
+    // UTC 当日零点 datetime('now','start of day')，同格式才能正确字典序比较。
     // 同一张卡的 Again 重试会有多条记录，进度应按卡计一次；并且应跟随当前词书筛选。
     `SELECT COUNT(DISTINCT c.id) n FROM reviews r JOIN cards c ON c.id = r.card_id
-     WHERE r.reviewed_at >= datetime('now', 'localtime', 'start of day')${dc}`,
+     WHERE r.reviewed_at >= datetime('now', 'start of day')${dc}`,
     dp,
   );
   const library = await count(
@@ -354,7 +418,7 @@ export async function getTodayStats(deck: string): Promise<TodayStats> {
 
 export async function getQueue(deck: string): Promise<QueueItem[]> {
   const db = await getApp();
-  const now = new Date().toISOString();
+  const now = fmtDbTime(); // due 存 UTC YYYY-MM-DD HH:MM:SS，同格式字典序比较（[B-01]）
   const { sql: dc, params: dp } = deckClause(deck);
   const cols = `c.id, c.word, c.source_id, c.deck, c.stability, c.difficulty, c.due,
                 c.last_review, c.state, c.reps, c.lapses, s.context AS source_context`;
@@ -375,6 +439,8 @@ export async function getQueue(deck: string): Promise<QueueItem[]> {
         )
       : [];
   const rows = [...due, ...fresh];
+  // 登记本窗口快照（CAS 用）：以加载时的 DB 原始字符串为准
+  for (const r of rows) cardSnapshots.set(r.id, { due: r.due, last_review: r.last_review, reps: r.reps, state: r.state });
   const dict = await dictEntries(rows.map((r) => r.word));
   return rows.map((r) => ({
     id: r.id,
@@ -393,19 +459,54 @@ export async function applyReview(
   scheduling: RecordLogItem,
   durationMs: number,
 ): Promise<void> {
-  const db = await getApp();
-  const c = scheduling.card;
-  const dueISO = c.due.toISOString();
-  await db.execute(
-    `UPDATE cards SET stability = ?, difficulty = ?, due = ?, last_review = ?,
-       state = ?, reps = ?, lapses = ? WHERE id = ?`,
-    [c.stability, c.difficulty, dueISO, new Date().toISOString(), c.state, c.reps, c.lapses, item.id],
-  );
-  await db.execute(
-    `INSERT INTO reviews (card_id, rating, state, stability, difficulty, due, duration_ms)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [item.id, grade, item.card.state, c.stability, c.difficulty, dueISO, Math.round(durationMs)],
-  );
+  const prev = reviewQueue;
+  let release!: () => void;
+  reviewQueue = new Promise<void>((r) => (release = r));
+  await prev;
+  try {
+    const db = await getApp();
+    // CAS 防陈旧覆盖：重读 DB 当前状态，与本窗口最近一次看到的快照比对；
+    // 不一致 = 被其他窗口并发改过 → 拒绝用旧快照覆盖。
+    // （同窗口内 Again 重现/练习重试会先经 applyReview 写库并刷新快照，不会误伤）
+    const snap = cardSnapshots.get(item.id);
+    const row = (
+      await db.select<{ due: string | null; last_review: string | null; reps: number; state: number }[]>(
+        "SELECT due, last_review, reps, state FROM cards WHERE id = ?",
+        [item.id],
+      )
+    )[0];
+    if (
+      snap &&
+      row &&
+      (row.state !== snap.state ||
+        row.reps !== snap.reps ||
+        row.due !== snap.due ||
+        row.last_review !== snap.last_review)
+    ) {
+      // 与窗口快照不一致 → 另一窗口刚复习过/改过这张卡，拒绝用旧快照覆盖
+      throw new Error("STALE_CARD");
+    }
+    const c = scheduling.card;
+    const due = fmtDbTime(c.due); // due 统一存 UTC YYYY-MM-DD HH:MM:SS（[B-01]）
+    const now = fmtDbTime();
+    await withTx([
+      {
+        sql: `UPDATE cards SET stability = ?, difficulty = ?, due = ?, last_review = ?,
+           state = ?, reps = ?, lapses = ? WHERE id = ?`,
+        params: [c.stability, c.difficulty, due, now, c.state, c.reps, c.lapses, item.id],
+      },
+      {
+        sql: `INSERT INTO reviews (card_id, reviewed_at, rating, state, stability, difficulty, due, duration_ms)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        // reviewed_at 显式写 UTC（不再依赖表 DEFAULT localtime）
+        params: [item.id, now, grade, item.card.state, c.stability, c.difficulty, due, Math.round(durationMs)],
+      },
+    ]);
+    // 写入成功后刷新窗口快照，同窗口后续重试/重复评分以新状态为准
+    cardSnapshots.set(item.id, { due, last_review: now, reps: c.reps, state: c.state });
+  } finally {
+    release();
+  }
 }
 
 // ---------- 词库浏览 ----------
@@ -441,8 +542,9 @@ export async function getLibrary(
   if (filter === "new") conds.push("state = 0");
   if (filter === "learned") conds.push("state != 0");
   if (q.trim()) {
-    conds.push("word LIKE ?");
-    params.push(q.trim() + "%");
+    // 转义 % _ 通配符，避免用户输入扩大匹配（[B-07]）
+    conds.push("word LIKE ? ESCAPE '\\'");
+    params.push(escapeLike(q.trim()) + "%");
   }
   params.push(LIB_PAGE_SIZE, page * LIB_PAGE_SIZE);
   return db.select<LibCard[]>(
@@ -510,14 +612,14 @@ export async function deleteCard(id: number): Promise<void> {
   await db.execute("UPDATE cards SET source_id = NULL WHERE id = ? AND source_id IS NOT NULL", [id]);
   await db.execute("DELETE FROM sources WHERE id NOT IN (SELECT source_id FROM cards WHERE source_id IS NOT NULL)");
   await db.execute("DELETE FROM cards WHERE id = ?", [id]);
-  // deleted_at 与 cards.added_at 同格式（SQLite 本地时间），两者才能直接字典序比较
+  // deleted_at 与 cards.added_at 同格式（UTC YYYY-MM-DD HH:MM:SS），两者才能直接字典序比较（[B-01]）
   await db.execute(
-    "INSERT INTO tombstones (word, deleted_at) VALUES (?, datetime('now','localtime')) ON CONFLICT(word) DO UPDATE SET deleted_at = excluded.deleted_at",
-    [row.word],
+    "INSERT INTO tombstones (word, deleted_at) VALUES (?, ?) ON CONFLICT(word) DO UPDATE SET deleted_at = excluded.deleted_at",
+    [row.word, fmtDbTime()],
   );
 }
 
-/** 墓碑表：词 → 删除时间（ISO，可按字典序比较） */
+/** 墓碑表：词 → 删除时间（UTC YYYY-MM-DD HH:MM:SS，可字典序比较；[B-01]） */
 export async function getTombstones(): Promise<Map<string, string>> {
   const db = await getApp();
   const rows = await db.select<{ word: string; deleted_at: string }[]>(
@@ -546,8 +648,8 @@ export async function deleteDeck(deck: string): Promise<{ tags: number; deleted:
   // 摘掉本书全部标签 + 记录移除（先记，防止后续同步回灌）
   await db.execute("DELETE FROM deck_words WHERE deck = ?", [deck]);
   await db.execute(
-    "INSERT INTO deck_removals (deck, removed_at) VALUES (?, datetime('now','localtime')) ON CONFLICT(deck) DO UPDATE SET removed_at = excluded.removed_at",
-    [deck],
+    "INSERT INTO deck_removals (deck, removed_at) VALUES (?, ?) ON CONFLICT(deck) DO UPDATE SET removed_at = excluded.removed_at",
+    [deck, fmtDbTime()],
   );
 
   // 独占词整删：批量 SQL（逐词走 deleteCard 会是几千次 IPC 往返）
@@ -557,9 +659,9 @@ export async function deleteDeck(deck: string): Promise<{ tags: number; deleted:
     const ph = chunk.map(() => "?").join(",");
     await db.execute(
       `INSERT INTO tombstones (word, deleted_at)
-       SELECT word, datetime('now','localtime') FROM cards WHERE word COLLATE NOCASE IN (${ph})
+       SELECT word, ? FROM cards WHERE word COLLATE NOCASE IN (${ph})
        ON CONFLICT(word) DO UPDATE SET deleted_at = excluded.deleted_at`,
-      chunk,
+      [fmtDbTime(), ...chunk],
     );
     await db.execute(
       `DELETE FROM reviews WHERE card_id IN (SELECT id FROM cards WHERE word COLLATE NOCASE IN (${ph}))`,

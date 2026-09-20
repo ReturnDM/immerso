@@ -28,6 +28,22 @@ export const GRADE_META: Record<number, { label: string; key: string; cls: strin
   [Rating.Easy]: { label: "简单", key: "4", cls: "bg-sky-950/70 hover:bg-sky-900/70 border-sky-900 text-sky-300" },
 };
 
+// ---------- 时间解析（[B-01] 配套） ----------
+/**
+ * 解析 DB 时间串为 Date。兼容三种存量格式：
+ * 1. 新格式 UTC 空格 "YYYY-MM-DD HH:MM:SS"（fmtDbTime / SQLite datetime('now')）→ 补 T+Z 按 UTC 解析；
+ * 2. ISO "YYYY-MM-DDTHH:MM:SS.sssZ"（旧版 toISOString 写入的 due/last_review）→ 直接解析；
+ * 3. 最老版本本地时间 "YYYY-MM-DD HH:MM:SS"（无时区标记）→ 与 1 无法区分，按 UTC 解析，
+ *    与「存量旧数据无法完美迁移」的整体取舍一致。
+ * 注意：直接 new Date("YYYY-MM-DD HH:MM:SS") 会按**本地时区**解析，丢失 UTC 语义（东八区偏 8h）。
+ */
+function parseDbTime(s: string | null | undefined): Date | undefined {
+  if (!s) return undefined;
+  const t = s.includes("T") ? s : s.replace(" ", "T") + "Z";
+  const d = new Date(t);
+  return Number.isNaN(d.getTime()) ? undefined : d;
+}
+
 /** 数据库行 + 补充的到期时间 → ts-fsrs Card */
 export function toCard(row: {
   state: number;
@@ -39,14 +55,16 @@ export function toCard(row: {
   lapses: number;
 }): Card {
   if (row.state === State.New) return createEmptyCard();
-  const due = new Date(row.due!);
-  const last = row.last_review ? new Date(row.last_review) : undefined;
+  const due = parseDbTime(row.due);
+  const last = parseDbTime(row.last_review);
+  const dueMs = due?.getTime() ?? Date.now();
+  const lastMs = last?.getTime() ?? 0;
   return {
-    due,
+    due: due ?? new Date(dueMs),
     stability: row.stability,
     difficulty: row.difficulty,
-    elapsed_days: last ? Math.max(0, Math.floor((Date.now() - last.getTime()) / 86_400_000)) : 0,
-    scheduled_days: last ? Math.max(0, Math.round((due.getTime() - last.getTime()) / 86_400_000)) : 0,
+    elapsed_days: last ? Math.max(0, Math.floor((Date.now() - lastMs) / 86_400_000)) : 0,
+    scheduled_days: last ? Math.max(0, Math.round((dueMs - lastMs) / 86_400_000)) : 0,
     reps: row.reps,
     lapses: row.lapses,
     state: row.state,

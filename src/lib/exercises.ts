@@ -41,7 +41,9 @@ function shuffled<T>(a: readonly T[]): T[] {
 
 /**
  * 为一张卡生成练习序列：设置里勾选的所有模式各过一遍，全部完成才算学会。
- * - 新词：跳过默写/听写（先认识后练），self 固定在首位（教学卡会消化它）
+ * - 新词先认识后练：默写/听写仅对「练过一轮」（reps>0）的新词留有放行口，
+ *   全新词（reps=0）显式排除（当前 NEW_WORD_MODES 仍不含默写/听写，见下方过滤注释）
+ * - self 固定在首位（教学卡会消化它）
  * - 顺序随机洗牌（新词 self 除外）：各词的轮次顺序彼此错开，同一种模式不会成串出现
  * - cloze/scramble 依赖收词原句，无原句时自动排除
  * - 四选一需要队列里至少 4 个词才能凑出干扰项
@@ -54,8 +56,13 @@ export function buildSequence(
   poolSize: number,
 ): ExMode[] {
   const seq = modes.filter((m) => {
-    if (isNew && !NEW_WORD_MODES.includes(m)) return false;
+    // 默写/听写对全新词（reps=0）一律先拦：先认识后默写。必须先于下方
+    // NEW_WORD_MODES 过滤执行——否则 reps 参数在此永远派不上用场（死条件）。
     if ((m === "dictation" || m === "listen") && isNew && reps === 0) return false;
+    // NEW_WORD_MODES 不含默写/听写：新词仍然默认不带这两项
+    // （reps>0 的放行口被它收住，当前产品语义 = 新词永不做默写/听写；
+    //  将来要放开只需把这两项加入 NEW_WORD_MODES 或放宽本行）。
+    if (isNew && !NEW_WORD_MODES.includes(m)) return false;
     if ((m === "cloze" || m === "scramble") && !hasContext) return false;
     if ((m === "choice_en" || m === "choice_zh") && poolSize < 4) return false;
     return true;
@@ -92,6 +99,9 @@ export function wordForms(exchange: string | null | undefined): string[] {
 /**
  * 原句挖空：依次尝试原形与各词形（不分大小写、词边界），替换首个命中的形为下划线。
  * 句中是 went 而卡是 go 时也能挖掉；全都不中返回 found=false（句子照显，按释义默写）。
+ * 边界用自定义 lookaround 替代 \b：\b 只认 [A-Za-z0-9_] 为词字符，对以非字母收尾的词
+ * （如 "C++"、"3.14"）两侧都非 \w 时没有边界、匹配必然失败；这里等价地要求
+ * 命中串前后都不是字母/数字/下划线，既保留词边界语义又兼容非字母字符。
  */
 export function blankWord(
   sentence: string,
@@ -101,7 +111,7 @@ export function blankWord(
   const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   for (const w of [word, ...forms]) {
     if (!w) continue;
-    const re = new RegExp(`\\b${esc(w)}\\b`, "i");
+    const re = new RegExp(`(?<![A-Za-z0-9_])${esc(w)}(?![A-Za-z0-9_])`, "i");
     if (re.test(sentence)) return { text: sentence.replace(re, "_____"), found: true, form: w };
   }
   return { text: sentence, found: false, form: null };

@@ -9,6 +9,12 @@ export function useCountUp(target: number, duration = 900): number {
       setValue(target);
       return;
     }
+    // duration<=0：没有动画时长就没有运动过程，直接落到目标值。
+    // 否则 (now - t0) / 0 在首帧（now===t0）产生 0/0=NaN，setValue(NaN) 会让数字显示成 NaN。
+    if (duration <= 0) {
+      setValue(target);
+      return;
+    }
     const t0 = performance.now();
     let raf = 0;
     const tick = (now: number) => {
